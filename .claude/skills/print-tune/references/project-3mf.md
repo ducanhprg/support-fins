@@ -16,6 +16,11 @@ doesn't fit them.
   first nine numbers row by row, t = the last three. A component's transform
   applies first, then its build item's. `build_tuned.py` composes and inverts them;
   `web/threemf.js` does the same independently, which is what `verify_fins.mjs` uses.
+- **Fins in an object made of several parts** (a pair of shoes as one object):
+  the builder merges them into the object's *first* component mesh, transformed
+  into that component's own frame, so they land in the right place on the plate
+  whatever the other components are. The slicer unions them like any overlapping
+  bodies.
 - **Object order**: the CLI's `--object N` and the engine's reader number objects
   by build item order, not model_settings order. `inspect_project.py` reports it as
   `cli_index`.

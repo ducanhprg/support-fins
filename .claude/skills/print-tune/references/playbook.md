@@ -26,8 +26,14 @@ Ask only what a file can't say: is this a display piece or does it carry load (a
 which way)? If it's obviously a figure or ornament, say so and confirm in one line.
 
 **Printer not X2D or U1** (a designer's file, e.g. an H2D project from MakerWorld):
-the profiles repo doesn't cover it. Say so and suggest re-saving it in their slicer
-for the X2D or U1 first, which is their workflow; analysis can still run meanwhile.
+the profiles repo doesn't cover it, and a tuned copy would carry someone else's
+machine and filament presets. Don't build. Run the analysis anyway (the pieces
+and their pose don't depend on the printer), and report it together with the
+plan you'll apply once it's re-saved, judged against the preset the re-save will
+most likely use (their naming: `<layer>mm <material> - x2d 0.4HS`, `<layer> <material>
+@Snapmaker U1 (0.4 Stainless Steel nozzle)`). Fold everything they must set in the
+slicer into that one re-save: printer, process, filament, and the interface
+material if you want one (section 3), so they do it once.
 
 ## 2. Per piece: fins, slicer supports, or nothing
 
@@ -42,9 +48,16 @@ for the X2D or U1 first, which is their workflow; analysis can still run meanwhi
   fins exist; it would grow tree supports between the fin walls as well.
 - **none-needed**: nothing to support.
 
-Not counted against fins-only: overhangs *too tight* for any support (print-in-place
-gaps: a support there would fuse the joint) and *near-bed* ones under 1 mm (the
-first layers carry them). Report both, don't act on them.
+Not counted: overhangs *too tight* for any support (the part sits within ~2 mm
+below: a print-in-place gap or a clearance, where a support would fuse the joint)
+and *near-bed* ones under 1 mm (the first layers carry them). The analysis lists
+them as "not counted"; report them, don't act on them. A piece whose overhangs are
+all of these kinds is `none-needed`.
+
+`none-needed` pieces: leave them alone. Don't switch their supports off just in
+case: the engine ignores slivers under 12 mm² that the slicer may still want to
+hold. If the slicer is likely to add pointless nubs (a near-bed edge on a big flat
+foot), mention that turning supports off for that one piece is an option.
 
 On large organic figures (ZKULL's head, body and hat; Jack), expect "supports":
 fins hold the straight runs but not the domes and the overhangs over the part. On
@@ -59,16 +72,19 @@ at (project layer height, or its own override). `build_tuned.py` refuses a misma
 
 **Pose.** Keep the pose the user placed. It's their plate layout and usually the
 designer's choice of which faces show. Run `--suggest` only for pieces that stand
-on a point or an edge with a small contact area, and *recommend* a turn only when
-it is clearly better (a real face on the bed and much less overhang). The builder
-doesn't rotate objects; the user does that in the slicer and re-runs.
+on a point or an edge with a small contact area. The output prints the current
+pose ("now") above the candidates. A turn is *clearly better* only when it puts a
+real face on the bed (seating `face`) **and** cuts the overhang markedly; an edge
+traded for another edge is not, however much overhang it saves (ZKULL's head:
+38% less overhang, still on an edge: kept). Recommend, don't apply: the builder
+doesn't rotate objects; the user turns it in the slicer and re-runs.
 
 ## 3. Supports for the pieces that keep them
 
 **Build plate only.** The profiles default to supports from the build plate only.
 Turn that off (`support_on_build_plate_only: 0`) when a "supports" piece has bare
 overhangs **over the part**: from the plate only, nothing reaches them and they
-print into air (ZKULL: inside the head, under the hood, inside the hat). Then warn:
+print into air (ZKULL: under the body's hood at 54 mm, inside the hat at 55 mm). Then warn:
 check the slice preview for supports inside closed cavities that can't be removed.
 If any appear, set that one piece back to build plate only.
 
@@ -90,10 +106,12 @@ support_interface_pattern         rectilinear_interlaced
 
 Use it only when `inspect_project.py` lists a loadable interface candidate, a free
 slot holding the other material. On the U1 only slots 1-4 are toolheads. If there's
-none, tell the user what to load in which slot (one dropdown in the slicer: their
-own preset `PLA (X2D 0.4HS)` / `PETG (Snapmaker U1 0.4 Stainless Steel)`, etc.) and
-either wait for them to re-save, or fall back as below. Never set a zero gap
-without it: same-material supports weld on. `build_tuned.py` refuses.
+none: build with the fallback below (usually that means writing nothing about the
+interface: the preset already has it), and tell the user exactly what to load in
+which free slot (one dropdown in the slicer: their own preset `PLA (X2D 0.4HS)` /
+`PETG (Snapmaker U1 0.4 Stainless Steel)`, etc.), then save and run this again for
+the zero-gap version. Never set a zero gap without it: same-material supports weld
+on. `build_tuned.py` refuses.
 
 Snapmaker also suggests PLA at 230 °C and the PETG bed at 65 °C for this pairing.
 Those are filament settings, so mention them; don't write them.
@@ -105,10 +123,13 @@ slicer rounds Z gaps **up to whole layers**: "0.24" at 0.16 mm layers is really
 
 ## 4. Brim: per piece, not global
 
-A piece that stands on a point, an edge, or under ~50 mm² of contact (ZKULL's head
-8 mm², hat 9 mm²) gets a brim of its own: `brim_type outer_only`, width 8 (ABS 10),
-gap 0.2, which is the profiles' convention. Leave the global brim alone. A brim on
-pieces that sit fine only adds cleanup and marks on the bottom edge.
+A piece that is tall for the foot it stands on gets a brim of its own: the
+analysis marks it `TIPPY->brim` (under 50 mm² of contact, or a height more than 8x
+the foot's width, sqrt of the contact area). That catches ZKULL's head (8 mm²) and
+hat (9 mm²), its body (74 mm tall on 67 mm²) and Jack (150 mm on 56 mm²), and not the
+legs (40 mm on 503 mm²). Use `brim_type outer_only`, width 8 (ABS 10), gap 0.2, the
+profiles' convention, and leave the global brim alone: a brim on pieces that sit
+fine only adds cleanup and marks on the bottom edge.
 
 ## 5. Everything else: keep the preset unless this model says otherwise
 

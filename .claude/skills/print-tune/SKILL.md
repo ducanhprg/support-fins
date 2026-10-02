@@ -38,8 +38,10 @@ non-obvious value is what it is. They are the reference to reason from: keep wha
 they get right for this model, and change what this model needs, saying why.
 
 If the printer isn't the X2D or the U1 (a designer's file, e.g. an H2D project),
-say so: their profiles don't cover it, and the fix is to re-save it in their
-slicer for the X2D or U1. Offer to analyze it in the meantime.
+don't build a tuned copy: it would carry someone else's machine presets. Analyze it
+anyway and report the analysis plus the plan you'll apply after they re-save it
+for the X2D or U1, with everything they must set in that one re-save (printer,
+process, filament, interface material). The playbook's section 1 has the details.
 
 ## 2. Ask only what the file can't say
 
@@ -54,12 +56,13 @@ project already answered.
 node --max-old-space-size=12000 .claude/skills/print-tune/scripts/analyze_pieces.mjs "<project>.3mf" --inspect <work>/project.json --json <work>/pieces.json
 ```
 
-About 30-60 s per million triangles. One line per piece: bed contact and how it
-sits, overhang regions, the fins the engine would build at this pose (walls, tines,
-grams), every overhang they can't reach (area, height, over the plate or over the
-part), loose pieces, and a verdict: `fins-only`, `supports` or `none-needed`. The
-fins are built exactly as the CLI builds them, with the piece's own material and
-layer height.
+About 30-60 s per million triangles. One line per piece: height and bed contact
+(`TIPPY->brim` when it's tall for its foot), overhang regions, the fins the engine
+would build at this pose (walls, tines, grams), every overhang that still needs a
+support (area, height, over the plate or over the part), what's not counted (too
+tight for any support, or near the bed), loose pieces, and a verdict: `fins-only`,
+`supports` or `none-needed`. The fins are built exactly as the CLI builds them,
+with the piece's own material and layer height.
 
 For pieces standing on a point or an edge with little contact, add
 `--suggest "Name,Name"` to rank other poses (slow, ~20 s per piece). Recommend a
@@ -70,10 +73,12 @@ turn only when it's clearly better; see the playbook.
 Apply `references/playbook.md` to the inspection and the analysis. Typical outcome:
 
 - `fins-only` pieces: fins merged, `enable_support: 0` for that piece;
-- supports from everywhere if any remaining piece has bare overhangs over the part;
+- `none-needed` pieces: left alone;
+- supports from everywhere if any `supports` piece has an overhang over the part;
 - the support interface in the other material when a free slot holds it
-  (zero gap), otherwise the profiles' one-layer gap;
-- a per-piece brim for pieces that barely touch the plate;
+  (zero gap); otherwise nothing written (the preset's gap stays) and the report
+  says what to load in which slot for next time;
+- a per-piece brim for every `TIPPY->brim` piece;
 - the rest of the preset kept.
 
 Make the fins for each fins-only piece (N is its `cli_index`, the material its

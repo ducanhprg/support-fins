@@ -22,6 +22,7 @@ const { readThreeMF } = await imp('web/threemf.js');
 const { buildFins } = await imp('web/fins.js');
 const { insidePart } = await imp('web/inside.js');
 const { suggestOrientations } = await imp('web/orient.js');
+const { tightRegions } = await imp('web/fins/tight.js');
 const { ENGINE_DEFAULTS } = await imp('plugins/shared/engine/fins_entry.js');
 const { clearances, seatSoup } = await imp('plugins/shared/engine/seat.js');
 
@@ -37,6 +38,11 @@ const MATERIALS = { PLA: 'pla', PETG: 'petg' };      // the engine's two; others
 // engine builds nothing under PROP.minHeightSquat, 0.6 mm, for that reason), so it
 // doesn't count against fins-only. Reported, not counted.
 const NEAR_BED = 1.0;   // mm
+// A piece is tippy when it's tall for the foot it stands on: height over the
+// foot's width (sqrt of the contact area) beyond this, or under 50 mm² at all.
+// Jack (150 mm on 56 mm²: 20x) and ZKULL's body (74 mm on 67 mm²: 9x) need a
+// brim; ZKULL's legs (40 mm on 503 mm²: 1.8x) don't.
+const TIPPY = 8, SMALL_FOOT = 50;   // ratio, mm²
 
 const euler = (e) => {    // three.js Euler XYZ of a column-major matrix, degrees (the site's readout)
   const c = (v) => Math.max(-1, Math.min(1, v)), d = (r) => Math.round(r * 180 / Math.PI);
@@ -73,6 +79,7 @@ for (let i = 0; i < m.objects.length; i++) {
   const b = buildFins(topo, res, I, { mode: 'auto', bedPad: true, tines: opts.tines, tineDensity: opts.tineDensity,
     layerHeight, coverage: opts.coverage, tunables });
   const off = res.offset;
+  const tightSet = new Set(tightRegions(topo, res, I, b.unservedRegions ?? []));
   const bare = (b.unservedRegions ?? []).map((ri) => {
     const g = res.regions[ri];
     let zs = 0, n = 0, overPlate = 0;
@@ -85,15 +92,17 @@ for (let i = 0; i < m.objects.length; i++) {
       for (let d = 0.3; d < z - 0.05; d += 0.5) if (insidePart(topo, I, off, x, y, z - d)) { hit = true; break; }
       if (!hit) overPlate++;
     }
-    return { area: +g.area.toFixed(0), z: +(zs / n).toFixed(1), over: overPlate * 2 >= n ? 'plate' : 'part' };
+    return { area: +g.area.toFixed(0), z: +(zs / n).toFixed(1),
+             over: tightSet.has(ri) ? 'tight' : overPlate * 2 >= n ? 'plate' : 'part' };
   });
-  const tightBare = b.unservedTight ?? 0;
   for (const x of bare) if (x.over === 'plate' && x.z < NEAR_BED) x.over = 'bed';
-  const realBare = (b.unserved ?? 0) - tightBare - bare.filter((x) => x.over === 'bed').length;
+  // 'tight' (print-in-place gaps: a support would fuse them) and 'bed' (the first
+  // layers carry them) are reported but don't need a support
+  const realBare = bare.filter((x) => x.over === 'plate' || x.over === 'part').length;
+  const tightBare = bare.filter((x) => x.over === 'tight').length;
   const walls = (b.braceCount ?? 0) + (b.propCount ?? 0);
-  const verdict = !res.regions.length ? 'none-needed'
-    : realBare === 0 && !b.floating.length && walls > 0 ? 'fins-only'
-    : 'supports';
+  const verdict = realBare || b.floating.length ? 'supports' : walls ? 'fins-only' : 'none-needed';
+  const tippy = res.bedArea < SMALL_FOOT || res.size.z / Math.sqrt(Math.max(res.bedArea, 1e-6)) > TIPPY;
   const row = {
     cli_index: i + 1, name: meta.name ?? o.name, material: fam, fin_material: material, layer_height: layerHeight,
     unsupported_material: !MATERIALS[fam],
@@ -104,7 +113,7 @@ for (let i = 0; i < m.objects.length; i++) {
     fins: { walls, tines: b.tines ?? 0, grams: +(volume([b.triangles, b.padTriangles ?? []]) * (fam === 'PETG' ? 1.27 : 1.24) / 1000).toFixed(2), pad: !!b.pad },
     bare_tight: tightBare, bare, bare_real: realBare,
     floating: b.floating.map((p) => ({ drop: +p.drop.toFixed(1), z: +p.lowest[2].toFixed(1) })),
-    verdict,
+    brim: tippy, verdict,
   };
   if (suggest.has(row.name)) {
     const s = suggestOrientations(topo, { top: 3 });
@@ -113,12 +122,15 @@ for (let i = 0; i < m.objects.length; i++) {
       over_area: +c.overArea.toFixed(0), regions: c.regions, coverage: +c.coverage.toFixed(2), seating: c.seating })) };
   }
   out.push(row);
-  const bareTxt = row.bare.length ? row.bare.map((x) => `${x.area}mm²@${x.z}mm/${x.over}`).join(' ') : '-';
-  console.log(`#${row.cli_index} ${row.name}  [${fam}${row.unsupported_material ? ' (fins as PLA!)' : ''}]  `
-    + `bed ${row.bed_area}mm² (${row.seating})  regions ${row.regions}  fins ${walls}w/${row.fins.tines}t ${row.fins.grams}g  `
-    + `bare: ${bareTxt}${tightBare ? `  (+${tightBare} too tight)` : ''}`
+  const real = row.bare.filter((x) => x.over === 'plate' || x.over === 'part');
+  const bareTxt = real.length ? real.map((x) => `${x.area}mm²@${x.z}mm/over-${x.over}`).join(' ') : 'none';
+  const skip = [tightBare && `${tightBare} too tight`, (row.bare.length - real.length - tightBare) && `${row.bare.length - real.length - tightBare} near-bed`].filter(Boolean);
+  console.log(`#${row.cli_index} ${row.name}  [${fam}${row.unsupported_material ? ' (fins as PLA!)' : ''}, ${layerHeight} mm]  `
+    + `h ${row.size[2]} on ${row.bed_area}mm² (${row.seating})${tippy ? ' TIPPY->brim' : ''}  regions ${row.regions} (${row.over_area}mm²)  `
+    + `fins ${walls}w/${row.fins.tines}t ${row.fins.grams}g  needs support: ${bareTxt}${skip.length ? `  (not counted: ${skip.join(', ')})` : ''}`
     + `${row.floating.length ? `  LOOSE ${JSON.stringify(row.floating)}` : ''}  => ${verdict}`);
   if (row.suggest) {
+    console.log(`     now:   h ${row.size[2]} bed ${row.bed_area} over ${row.over_area} regions ${row.regions} (${row.seating})`);
     for (const c of row.suggest.candidates) {
       console.log(`     pose X${c.rot_xyz[0]} Y${c.rot_xyz[1]} Z${c.rot_xyz[2]}: h ${c.height} bed ${c.bed_area} over ${c.over_area} `
         + `regions ${c.regions} covered ${Math.round(c.coverage * 100)}% (${c.seating})`);

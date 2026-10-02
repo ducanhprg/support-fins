@@ -171,9 +171,10 @@ def host_visible(ctx, key, values):
 def host_report(stats):
     """The one-line result every plugin shows, from the engine's stats.
 
-    Says what was placed, and -- quality first -- what wasn't: overhangs too shallow
-    for a fin this way up, and pieces that start in mid-air. Same facts as the
-    website's readout (web/ui/readout.js), shorter.
+    Says what was placed, and -- quality first -- what wasn't: overhangs that got no
+    fin this way up (the ones too close above the part for any fin named apart), and
+    pieces that start in mid-air. Same facts as the website's readout
+    (web/ui/readout.js), shorter.
     """
     walls = stats.get("braces", 0) + stats.get("props", 0)   # tined + plain, as the site counts
     tines = stats.get("tines", 0)
@@ -182,9 +183,15 @@ def host_report(stats):
     if braces:   # they hold the tall sides, not an overhang: never added to the walls
         parts[0] += f", {braces} sway brace{'' if braces == 1 else 's'}"
     unserved = stats.get("unserved") or 0
-    if unserved:
-        parts.append(f"{unserved} overhang{' is' if unserved == 1 else 's are'} too shallow "
-                     "for a fin this way up (tilt the part steeper)")
+    tight = min(unserved, stats.get("unservedTight") or 0)
+    if tight:
+        gap = float(stats.get("tightGap") or 0)
+        parts.append(f"{tight} overhang{' sits' if tight == 1 else 's sit'} too close above the part "
+                     f"for a fin (gap under {gap:.1f} mm)")
+    if unserved - tight:
+        rest = unserved - tight
+        parts.append(f"{rest} overhang{'' if rest == 1 else 's'} got no fin this way up "
+                     "(try another pose, or add a wall by hand)")
     floating = stats.get("floating") or 0
     if floating:
         drop = float(stats.get("floatingDrop") or 0)

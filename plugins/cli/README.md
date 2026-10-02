@@ -32,7 +32,8 @@ Settings the site would hide (`--sway-reach` without `--sway`) run but warn.
 (`--coverage 70`, `--tine-density 50`), on/off settings are `--sway` / `--no-tines`.
 
 **What it tells you.** One line per file: walls, tines, and anything left unsupported
-(overhangs too shallow for a fin this way up, pieces that start in mid-air). That is a
+(overhangs that got no fin this way up -- the ones too close above the part for any fin
+named apart -- and pieces that start in mid-air). That is a
 report, not a failure: exit 0. Exit 1 = a file couldn't be read or finned (the other
 files still are); exit 2 = bad arguments, nothing ran.
 

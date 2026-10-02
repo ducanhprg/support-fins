@@ -31,55 +31,41 @@ function explainNoFins(b) {
          + 'stand on. Turn the bed pad on to seat it, or rotate until it sits '
          + 'down on a face or an edge';
   }
-  if (b.mode === 'prop') {
-    const s = b.skipped ?? {};
-    if (!b.rejected.sites) return 'no overhangs to prop in this orientation';
-    // Named in the order that tells the user the most. Each is a different
-    // stage of the search, and lumping them into "blocked" is what let M5 be
-    // recorded as working on a part where it built nothing.
-    if (s.wanders) {
-      const one = s.wanders === 1;
-      return `${s.wanders} overhang${one ? ' is' : 's are'} bowl-shaped rather than `
-           + `a ledge — ${one ? 'its' : 'their'} lowest points form a ring, not a `
-           + 'line, so there is nothing for a wall to follow. Rotate, or switch '
-           + 'to Draw and place one by hand';
-    }
-    if (s.buried || s.weld) {
-      return 'every wall that reaches these overhangs would fuse to the '
-           + 'part — rotate, or switch to Draw and place one by hand';
-    }
-    if (s.blocked) {
-      return 'no run of these overhangs is long enough to stand a wall under — '
-           + 'the part is in the way, or they sit too close to the plate';
-    }
-    if (s.stub || s.noLine || s.sliver) {
-      return 'the overhangs here are too small or too low to be worth a wall';
-    }
-    if (s.degenerate) {
-      return 'the contact lines here collapse to a point — nothing to sweep along';
-    }
-    return 'no overhang here can take a prop in this orientation';
+  // Auto IS prop's walls plus wedges, so its walls carry prop's reasons too. (Auto
+  // used to fall through to a leftover branch for the deleted leaning fin, which
+  // read patch counters nothing sets any more and always said "no flat upright
+  // face" -- on a ghost whose only misses were a domed roof and a 6 mm peg.)
+  const s = b.skipped ?? {};
+  if (!b.rejected.sites) return 'no overhangs to prop in this orientation';
+  // Named in the order that tells the user the most. Each is a different
+  // stage of the search, and lumping them into "blocked" is what let M5 be
+  // recorded as working on a part where it built nothing.
+  if (s.wanders) {
+    const one = s.wanders === 1;
+    return `${s.wanders} overhang${one ? ' is' : 's are'} bowl-shaped rather than `
+         + `a ledge — ${one ? 'its' : 'their'} lowest points form a ring, not a `
+         + 'line, so there is nothing for a wall to follow. Rotate, or switch '
+         + 'to Draw and place one by hand';
   }
-  const st = b.patchStats ?? {};
-  if (!b.patchCount) {
-    // a cylinder or a mesh of small facets has no flat face wide enough
-    return (st.tooNarrow ?? 0) > (st.notFlat ?? 0)
-      ? 'nothing flat and wide enough to stand a fin against — curved or '
-        + 'finely faceted surfaces have no flat face to grip'
-      : 'no flat upright face on this part in this orientation';
+  if (s.buried || s.weld) {
+    return 'every wall that reaches these overhangs would fuse to the '
+         + 'part — rotate, or switch to Draw and place one by hand';
   }
-  if (!b.rejected.sites) {
-    return st.tooHigh
-      ? `${st.tooHigh} flat face${st.tooHigh === 1 ? '' : 's'} found, but every `
-        + 'one starts too far up the part — a fin would be mostly bare stilt. '
-        + 'Rotate so a flat face runs down to the plate'
-      : 'no usable face in this orientation — try rotating';
+  if (s.blocked) {
+    return 'no run of these overhangs is long enough to stand a wall under — '
+         + 'the part is in the way, or they sit too close to the plate';
   }
-  if (b.rejected.blocked) {
-    return 'the part is in the way of every wall position on the faces it found '
-         + '— rotate, or switch to Draw and place one by hand';
+  if (s.noLine && s.noLine >= (s.stub ?? 0)) {
+    return 'the overhangs here curve too much for a straight wall to follow (a dome or '
+         + 'a rounded roof) — rotate, or switch to Draw and place one by hand';
   }
-  return 'the workable spots would put the fin inside the part — try rotating';
+  if (s.stub || s.noLine || s.sliver) {
+    return 'the overhangs here are too small or too low to be worth a wall';
+  }
+  if (s.degenerate) {
+    return 'the contact lines here collapse to a point — nothing to sweep along';
+  }
+  return 'no overhang here can take a support in this orientation';
 }
 
 // Grams use the selected material's density (materialDensity, set by applyMaterial),
@@ -294,7 +280,7 @@ function updateFinReadout(built, ms) {
   if (!n && !drawnOk) {
     // Nothing placed -- the box already says "none possible"; the why goes in the
     // (i), since it's a paragraph and the user can hover for it.
-    help.push(explainNoFins(built));
+    help.push(`${explainNoFins(built)}.`);
   } else if (n) {
     if (built.mode === 'auto') {
       // Make "why no tines" legible: props never take tines, only the gripping
@@ -359,12 +345,22 @@ function updateFinReadout(built, ms) {
             + 'between supports — nudge the slider right if the surface bows');
   }
   if (built.unserved) {
-    // An un-served ledge is a shallow overhang with no room for a prop and too
-    // flat to stand a fin against. The fix (tilt steeper) is a sentence, so it
-    // rides in the (i) rather than the panel.
-    help.push(`${built.unserved} overhang${built.unserved === 1 ? ' is' : 's are'} `
-            + 'too shallow for a fin this way up. Tilt the part steeper so a fin can '
-            + 'follow it (try Suggest orientation), or add a wall by hand.');
+    // Bare overhangs, in the (i). The ones sitting just above the part (a
+    // print-in-place joint, a clearance gap) get their own sentence: no fin fits
+    // there in any pose, and "tilt it" sent people turning a part that was
+    // already the right way up (fins/tight.js).
+    const tight = Math.min(built.unserved, built.unservedTight ?? 0);
+    const rest = built.unserved - tight;
+    if (tight) {
+      help.push(`${tight} overhang${tight === 1 ? ' sits' : 's sit'} less than `
+              + `${(built.tightGap ?? 0).toFixed(1)} mm above the part — too tight for a fin, and a `
+              + 'support there would fuse the gap shut. Print-in-place joints and clearances '
+              + 'are meant to print like this.');
+    }
+    if (rest) {
+      help.push(`${rest} overhang${rest === 1 ? '' : 's'} got no fin this way up. Try `
+              + 'another pose (Suggest orientation), or add a wall by hand.');
+    }
   }
   // Sway braces were asked for, so say what they did -- and why, if nothing.
   if (sw) {

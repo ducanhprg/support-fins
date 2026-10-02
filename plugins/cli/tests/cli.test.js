@@ -242,10 +242,21 @@ Deno.test('cli: the summary line says what was left unsupported, word for word w
     { braces: 0, props: 2, tines: 0, unserved: 3, floating: 1, floatingDrop: 4.26 },
     { braces: 2, tines: 5, floating: 2, floatingDrop: 12 },
     { braces: 1, tines: 2, floating: 1, floatingDrop: 4.25 },   // a tie: Python rounds to even
+    { braces: 0, tines: 0, unserved: 5, unservedTight: 3, tightGap: 1.9 },
+    { unserved: 1, unservedTight: 1, tightGap: 2.0 },
+    { unserved: 2, unservedTight: 2, tightGap: 1.95 },          // stored 1.9499...: Python says 1.9
+    { floating: 1, floatingDrop: 0.35 },                        // stored 0.3499...: 0.3, not a tie
   ];
-  assert(/1 overhang is too shallow/.test(reportLine(samples[1])), reportLine(samples[1]));
+  assert(/1 overhang got no fin this way up/.test(reportLine(samples[1])), reportLine(samples[1]));
+  assert(reportLine(samples[5]) === '0 walls, 0 tines; 3 overhangs sit too close above the part for a fin '
+    + '(gap under 1.9 mm); 2 overhangs got no fin this way up (try another pose, or add a wall by hand)',
+    reportLine(samples[5]));
+  assert(/1 overhang sits too close above the part for a fin \(gap under 2\.0 mm\)$/.test(reportLine(samples[6])),
+    reportLine(samples[6]));
   assert(/one piece isn't joined to the rest: it starts 4\.3 mm up/.test(reportLine(samples[2])), reportLine(samples[2]));
   assert(/it starts 4\.2 mm up/.test(reportLine(samples[4])), reportLine(samples[4]));
+  assert(/gap under 1\.9 mm/.test(reportLine(samples[7])), reportLine(samples[7]));
+  assert(/it starts 0\.3 mm up/.test(reportLine(samples[8])), reportLine(samples[8]));
   let py;
   try {
     py = new Deno.Command('python3', {

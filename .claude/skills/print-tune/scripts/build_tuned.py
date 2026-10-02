@@ -18,7 +18,12 @@ PLAN.json:
   }
 }
 
+An override set to null removes that key from the object: a designer's per-object
+setting that shouldn't follow the print to another machine.
+
 Refuses, rather than writes a file that would print badly:
+  - a project for a printer the user's profiles don't cover (only the X2D and the
+    U1): the copy would carry someone else's machine presets (--any-printer overrides);
   - a zero top Z gap whose interface filament is not a different, low-adhesion
     material from every object it would touch (supports would weld on);
   - fins cut for a layer height the object doesn't print at (tines must be one layer);
@@ -27,6 +32,7 @@ Refuses, rather than writes a file that would print badly:
 import argparse, json, os, re, struct, sys, zipfile
 
 LOW_ADHESION = {frozenset({'PLA', 'PETG'}), frozenset({'PLA', 'TPU'})}
+PRINTERS = ('X2D', 'U1')   # the machines in the user's profiles repo
 
 
 def family(t):
@@ -111,6 +117,8 @@ def main():
     ap.add_argument('project')
     ap.add_argument('plan')
     ap.add_argument('--out')
+    ap.add_argument('--any-printer', action='store_true',
+                    help='tune a project for a printer the profiles do not cover')
     a = ap.parse_args()
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
@@ -127,6 +135,10 @@ def main():
     ms = zin.read('Metadata/model_settings.config').decode('utf-8')
     root = zin.read('3D/3dmodel.model').decode('utf-8')
     types = ps.get('filament_type', [])
+    printer = ps.get('printer_model') or ps.get('printer_settings_id') or ''
+    assert a.any_printer or any(p in printer for p in PRINTERS), (
+        f'the project is set up for {printer!r}, not the X2D or the U1: re-save it for one '
+        'of them in the slicer first (or pass --any-printer)')
 
     # object name -> model_settings block, slots, overrides
     objects, dup_slots = {}, {}
@@ -197,13 +209,17 @@ def main():
         diff[0] = ';'.join(sorted(set(k for k in diff[0].split(';') if k) | set(SET)))
     changed['Metadata/project_settings.config'] = json.dumps(ps, indent=4, ensure_ascii=False).encode('utf-8')
 
-    # --- per-object overrides: replace a key the object already has, else add it ---
+    # --- per-object overrides: replace a key the object already has, else add it;
+    #     null removes it ---
     for name, spec in OBJ.items():
         for k, v in spec.get('overrides', {}).items():
             oid = objects[name]['id']
             m = re.search(r'<object id="' + oid + r'">\n(.*?)(?=\n\s*<part)', ms, re.S)
             head = m.group(0)
-            if re.search(r'<metadata key="' + re.escape(k) + r'" value="[^"]*"/>', head):
+            if v is None:
+                assert k not in ('name', 'extruder'), f'refusing to remove {k!r} from {name!r}'
+                new = re.sub(r'\n\s*<metadata key="' + re.escape(k) + r'" value="[^"]*"/>', '', head)
+            elif re.search(r'<metadata key="' + re.escape(k) + r'" value="[^"]*"/>', head):
                 new = re.sub(r'(<metadata key="' + re.escape(k) + r'" value=")[^"]*("/>)', lambda mm: mm.group(1) + str(v) + mm.group(2), head)
             else:
                 ind = re.search(r'\n(\s*)<metadata key="name"', head).group(1)

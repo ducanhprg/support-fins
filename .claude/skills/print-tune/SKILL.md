@@ -64,9 +64,11 @@ tight for any support, or near the bed), loose pieces, and a verdict: `fins-only
 `supports` or `none-needed`. The fins are built exactly as the CLI builds them,
 with the piece's own material and layer height.
 
-For pieces standing on a point or an edge with little contact, add
-`--suggest "Name,Name"` to rank other poses (slow, ~20 s per piece). Recommend a
-turn only when it's clearly better; see the playbook.
+To rank other poses for pieces standing on a point or an edge with little
+contact, add `--suggest "Name,Name"` (slow, ~20 s per piece). Put it on the first
+run when the inspection already makes those pieces obvious; otherwise re-run with
+`--only "Name,Name" --suggest "Name,Name"` so the other pieces aren't analyzed
+twice. Recommend a turn only when it's clearly better; see the playbook.
 
 ## 4. Decide, then write the plan
 
@@ -99,13 +101,15 @@ Write `<work>/plan.json` (fins paths relative to the plan):
   "objects": {
     "Legs": {"overrides": {"enable_support": "0"}, "fins": "fins-Legs.stl",
              "fin_layer_height": 0.16, "fin_material": "petg"},
-    "Head": {"overrides": {"brim_type": "outer_only", "brim_width": "8", "brim_object_gap": "0.2"}}
+    "Head": {"overrides": {"brim_type": "outer_only"}},
+    "jack1a.stl": {"overrides": {"support_style": null}}
   }
 }
 ```
 
 Only put a setting in the plan when it changes something, and know the reason for
-each one; the report has to state it.
+each one; the report has to state it. A per-object override set to `null` removes
+it (a designer's machine-specific setting; see the playbook).
 
 ## 5. Build and verify
 

@@ -60,8 +60,8 @@ def main():
     for name, spec in OBJ.items():
         m = re.search(r'<metadata key="name" value="' + re.escape(name) + r'"/>(.*?)<part', mb, re.S)
         got = dict(re.findall(r'<metadata key="([^"]+)" value="([^"]*)"', m.group(1))) if m else {}
-        ov = {k: str(v) for k, v in spec.get('overrides', {}).items()}
-        check(all(got.get(k) == v for k, v in ov.items()), f'{name}: overrides {ov}')
+        ov = {k: (None if v is None else str(v)) for k, v in spec.get('overrides', {}).items()}
+        check(all(got.get(k) == v for k, v in ov.items()), f'{name}: overrides {ov}')   # None: removed
 
     pairs = [f'{n}={os.path.join(os.path.dirname(os.path.abspath(plan_path)), s["fins"])}' for n, s in OBJ.items() if s.get('fins')]
     if pairs:

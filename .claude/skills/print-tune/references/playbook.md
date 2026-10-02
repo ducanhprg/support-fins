@@ -33,7 +33,17 @@ plan you'll apply once it's re-saved, judged against the preset the re-save will
 most likely use (their naming: `<layer>mm <material> - x2d 0.4HS`, `<layer> <material>
 @Snapmaker U1 (0.4 Stainless Steel nozzle)`). Fold everything they must set in the
 slicer into that one re-save: printer, process, filament, and the interface
-material if you want one (section 3), so they do it once.
+material if you want one (section 3), so they do it once. Which printer: a Bambu
+Studio file goes to the X2D, a Snapmaker Orca file to the U1. If the model only
+fits or only makes sense on the other one (size, colours), say so and give both.
+`build_tuned.py` refuses other printers anyway.
+
+**A designer's per-object overrides** (a MakerWorld file often carries speeds,
+infill and support style tuned for *their* machine) come along through the re-save.
+Keep the ones that are about the model (walls and infill for a figurine are the
+designer's own advice) and drop the ones that are about their machine (speeds,
+accelerations, a support style that overrides the user's): an override set to
+`null` in the plan removes it.
 
 ## 2. Per piece: fins, slicer supports, or nothing
 
@@ -62,6 +72,12 @@ foot), mention that turning supports off for that one piece is an option.
 On large organic figures (ZKULL's head, body and hat; Jack), expect "supports":
 fins hold the straight runs but not the domes and the overhangs over the part. On
 mechanical parts and simple figures (ZKULL's legs), fins often hold everything.
+
+**Near misses**: a piece where fins hold everything except one small overhang
+(ZKULL's head: all but 45 mm² at 3 mm) is still `supports`, and the user will ask
+why. Say exactly what stops it, so the next step is theirs: paint support on just
+that spot in the slicer and the rest could go fins-only (fins plus painted support,
+not automatic supports), or accept the slicer's supports this time.
 
 **Material.** The engine knows PLA and PETG. PETG fuses to supports far harder, so
 its fins stand off further: always pass `--material petg` for a PETG piece.
@@ -113,8 +129,16 @@ which free slot (one dropdown in the slicer: their own preset `PLA (X2D 0.4HS)` 
 the zero-gap version. Never set a zero gap without it: same-material supports weld
 on. `build_tuned.py` refuses.
 
-Snapmaker also suggests PLA at 230 °C and the PETG bed at 65 °C for this pairing.
-Those are filament settings, so mention them; don't write them.
+Temperatures for the pairing (Snapmaker's U1 guide; filament settings, so mention
+them, don't write them):
+- PETG model, PLA interface: PLA at 230 °C, PETG bed 65 °C;
+- PLA model, PETG interface: PETG at 265 °C with max volumetric speed 10 mm³/s,
+  PLA at 230 °C, bed 65 °C.
+On the X2D these are the U1's numbers, a starting point; the user's own X2D
+filament presets are the reference there. The X2D has two nozzles fed from AMS:
+put the interface material on the *other* nozzle from the model's (Bambu Studio's
+filament grouping, "Auto For Flush" usually does it; tell the user to check), or
+every interface layer costs a filament change and a purge.
 
 **No second material:** keep the profiles' gap rule, `ceil(0.15 / layer) × layer`
 (0.16 at 0.16 mm layers) with their gapped interface (3 layers, spacing 0.2). The
@@ -129,7 +153,9 @@ the foot's width, sqrt of the contact area). That catches ZKULL's head (8 mm²) 
 hat (9 mm²), its body (74 mm tall on 67 mm²) and Jack (150 mm on 56 mm²), and not the
 legs (40 mm on 503 mm²). Use `brim_type outer_only`, width 8 (ABS 10), gap 0.2, the
 profiles' convention, and leave the global brim alone: a brim on pieces that sit
-fine only adds cleanup and marks on the bottom edge.
+fine only adds cleanup and marks on the bottom edge. The profiles already carry
+width 8 and gap 0.2 as the global values the brim falls back to, so usually only
+`brim_type` goes in the plan; add width/gap only where the project's differ.
 
 ## 5. Everything else: keep the preset unless this model says otherwise
 
@@ -142,8 +168,9 @@ reason from *this* model, and give the reason:
   default");
 - a feature the preset can't print (wall thinner than two lines...).
 
-"It saves time" is not a reason on a quality print. Cutting ZKULL's 9/7 shells to
-6/4 was a mistake, reverted.
+"It saves time" is not a reason on a quality print. Cutting the 9 top / 7 bottom
+shells of the U1's `0.16 PLA` preset to 6/4 on an early ZKULL tune was a mistake,
+reverted.
 
 ## 6. Out of scope: say it, don't do it
 

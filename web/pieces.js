@@ -4,7 +4,7 @@
  * prototype/spike_overhangs.py); this is about whole pieces, and has no Python
  * twin.
  */
-import { BED_EPS, IDENTITY3 } from './overhangs.js';
+import { BED_EPS, IDENTITY3, RESTS_ON } from './overhangs.js';
 
 /**
  * Pieces of the part that start in mid-air.
@@ -19,8 +19,9 @@ import { BED_EPS, IDENTITY3 } from './overhangs.js';
  * for the readout to say out loud.
  *
  * A piece counts as resting when a ray straight down from its lowest point meets
- * another piece within RESTS_ON (a stacked print-in-place part), or when it
- * reaches the plate (BED_EPS).
+ * another piece within RESTS_ON (a stacked print-in-place part), when it
+ * reaches the plate (BED_EPS), or when it is sunk partly into another piece (an
+ * inlay the slicer merges with it).
  *
  * @returns [{ faces, lowest: [x, y, z], drop }] in the seated frame of `result`,
  *          `drop` = how far the lowest point hangs over whatever is below it
@@ -28,7 +29,6 @@ import { BED_EPS, IDENTITY3 } from './overhangs.js';
  */
 export function floatingPieces(topo, result, rot = IDENTITY3) {
   const { pos, nFaces, adjA, adjB } = topo;
-  const RESTS_ON = 0.3;
   const off = result.offset;
   const parent = new Int32Array(nFaces);
   for (let f = 0; f < nFaces; f++) parent[f] = f;
@@ -100,6 +100,56 @@ export function floatingPieces(topo, result, rot = IDENTITY3) {
     }
   }
 
+  // Height of triangle f's plane straight above/below (px, py), or null when the
+  // point is outside its plan footprint (or the triangle stands on edge).
+  const zAt = (f, px, py) => {
+    const t = f * 9;
+    const ax = P[t], ay = P[t + 1], bx = P[t + 3], by = P[t + 4], qx = P[t + 6], qy = P[t + 7];
+    const d = (by - qy) * (ax - qx) + (qx - bx) * (ay - qy);
+    if (Math.abs(d) < 1e-12) return null;
+    const l1 = ((by - qy) * (px - qx) + (qx - bx) * (py - qy)) / d;
+    const l2 = ((qy - ay) * (px - qx) + (ax - qx) * (py - qy)) / d;
+    const l3 = 1 - l1 - l2;
+    if (l1 < -1e-9 || l2 < -1e-9 || l3 < -1e-9) return null;
+    return l1 * P[t + 2] + l2 * P[t + 5] + l3 * P[t + 8];
+  };
+  // Is (px, py, pz) inside the solid the OTHER pieces make? Winding number of a
+  // ray straight up: a face it leaves through (normal up) counts +1, one it
+  // enters through -1. Parity would get both cases here wrong -- two overlapping
+  // bodies cross twice (even, "outside"), and a hollow part's inward void shell
+  // has to cancel its outer skin -- where the winding number reads 2 and 0.
+  const insideOther = (r, px, py, pz) => {
+    let wind = 0;
+    for (const f of cells.get(cx(px) * G + cy(py)) ?? []) {
+      if (root[f] === r) continue;
+      const z = zAt(f, px, py);
+      if (z === null || z <= pz) continue;
+      const t = f * 9;
+      const up = (P[t + 3] - P[t]) * (P[t + 7] - P[t + 1]) - (P[t + 4] - P[t + 1]) * (P[t + 6] - P[t]);
+      wind += up > 0 ? 1 : -1;
+    }
+    return wind > 0;
+  };
+  // A piece sunk partly INTO another is not loose: the slicer merges overlapping
+  // bodies, so it prints joined. Multi-colour models are built this way (a
+  // ghost's eyes and blush are separate bodies pressed into its face), and their
+  // lowest point can still hang over air -- the old test called all seven
+  // floating. Probe a spread of the piece's faces; a few inside is enough.
+  const EMBED_PROBES = 32;
+  const embedded = (r) => {
+    const faces = [];
+    for (let f = 0; f < nFaces; f++) if (root[f] === r) faces.push(f);
+    const step = Math.max(1, Math.floor(faces.length / EMBED_PROBES));
+    let probed = 0, inside = 0;
+    for (let i = 0; i < faces.length; i += step) {
+      const t = faces[i] * 9;
+      probed++;
+      if (insideOther(r, (P[t] + P[t + 3] + P[t + 6]) / 3, (P[t + 1] + P[t + 4] + P[t + 7]) / 3,
+                      (P[t + 2] + P[t + 5] + P[t + 8]) / 3)) inside++;
+    }
+    return inside >= Math.max(2, 0.1 * probed);
+  };
+
   const out = [];
   for (const [r, g] of lifted) {
     const [px, py, pz] = g.lowest;
@@ -107,19 +157,11 @@ export function floatingPieces(topo, result, rot = IDENTITY3) {
     let below = -Infinity;
     for (const f of cells.get(cx(px) * G + cy(py)) ?? []) {
       if (root[f] === r) continue;
-      const t = f * 9;
-      const ax = P[t], ay = P[t + 1], bx = P[t + 3], by = P[t + 4], qx = P[t + 6], qy = P[t + 7];
-      const d = (by - qy) * (ax - qx) + (qx - bx) * (ay - qy);
-      if (Math.abs(d) < 1e-12) continue;
-      const l1 = ((by - qy) * (px - qx) + (qx - bx) * (py - qy)) / d;
-      const l2 = ((qy - ay) * (px - qx) + (ax - qx) * (py - qy)) / d;
-      const l3 = 1 - l1 - l2;
-      if (l1 < -1e-9 || l2 < -1e-9 || l3 < -1e-9) continue;
-      const z = l1 * P[t + 2] + l2 * P[t + 5] + l3 * P[t + 8];
-      if (z <= pz + 1e-6 && z > below) below = z;
+      const z = zAt(f, px, py);
+      if (z !== null && z <= pz + 1e-6 && z > below) below = z;
     }
     const drop = below === -Infinity ? pz : pz - below;
-    if (drop > RESTS_ON) out.push({ faces: g.faces, lowest: g.lowest, drop });
+    if (drop > RESTS_ON && !embedded(r)) out.push({ faces: g.faces, lowest: g.lowest, drop });
   }
   return out;
 }

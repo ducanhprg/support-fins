@@ -116,16 +116,38 @@ export function updateReadout(built, ms) {
  * Two audiences, two homes. `lead` is the short, must-see stuff -- a support that
  * couldn't build, a part balanced on a point -- and stays in the status panel.
  * `detail` is the how-it-works / how-to-fix text, which reads as a wall when it's
- * always on, so it's tucked behind the (i) on the Fins row where a curious user
- * can hover for it. Either can be empty.
+ * always on, so it's tucked behind the (i) on the Fins row: a click (or tap, or
+ * Enter) opens it as a panel under the stats. Either can be empty.
+ *
+ * `urgent` = nothing was placed, so the detail IS the answer to "why no fins?":
+ * the panel opens by itself then, unless the user has closed it before. A click
+ * is remembered for the session either way.
  */
-function setFinNote(lead, detail) {
+function setFinNote(lead, detail, urgent = false) {
   el('s-fin-note').textContent = lead.length ? lead.join('. ') + '.' : '';
   const info = el('s-fin-info');
-  const text = detail.filter(Boolean).join(' ');
-  if (text) { info.title = text; info.hidden = false; }
-  else { info.title = ''; info.hidden = true; }
+  const why = el('s-fin-why');
+  const items = detail.filter(Boolean);
+  why.replaceChildren(...items.map((t) => {
+    const p = document.createElement('p');
+    p.textContent = t;
+    return p;
+  }));
+  info.hidden = !items.length;
+  showWhy(items.length > 0 && (whyChoice ?? urgent));
 }
+
+// null until the user clicks the (i); then their choice, for the session.
+let whyChoice = null;
+function showWhy(open) {
+  el('s-fin-why').hidden = !open;
+  el('s-fin-info').setAttribute('aria-expanded', String(open));
+  el('s-fin-info').classList.toggle('open', open);
+}
+el('s-fin-info').addEventListener('click', () => {
+  whyChoice = el('s-fin-why').hidden;
+  showWhy(whyChoice);
+});
 
 /**
  * Draw mode's readout. Reports the breakaway WALLS the user drew by hand (a wall
@@ -280,7 +302,11 @@ function updateFinReadout(built, ms) {
   if (!n && !drawnOk) {
     // Nothing placed -- the box already says "none possible"; the why goes in the
     // (i), since it's a paragraph and the user can hover for it.
-    help.push(`${explainNoFins(built)}.`);
+    // ...unless every bare overhang is a tight gap: the sentence for those (below)
+    // is the whole answer, and the search-stage one beside it read as a contradiction.
+    if (!built.unserved || (built.unservedTight ?? 0) < built.unserved) {
+      help.push(`${explainNoFins(built)}.`);
+    }
   } else if (n) {
     if (built.mode === 'auto') {
       // Make "why no tines" legible: props never take tines, only the gripping
@@ -374,7 +400,7 @@ function updateFinReadout(built, ms) {
       }
     }
   }
-  setFinNote(lead, help);
+  setFinNote(lead, help, n === 0 && !drawnOk && !sw?.count);
   // ms is absent when a hand-drawn wall (Suggest + Draw mix) re-runs the readout
   // without rebuilding the auto fins -- don't touch the timing line then, and
   // never throw, or the updateReceipt() call after this one never happens.

@@ -361,6 +361,23 @@ html, body {
 }
 .note-info[hidden] { display: none; }
 .note-info:hover { color: var(--text); border-color: var(--dim); }
+/* It opens a panel now (it was a title tooltip), so it's a pointer, shows a
+   focus ring, and stays lit while the panel is open. */
+.note-info { cursor: pointer; }
+.note-info:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.note-info.open { color: var(--accent); border-color: var(--accent); }
+
+/* The panel the (i) opens, under the stats: one paragraph per reason. */
+.why {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.why p { margin: 0; }
+.why p + p { margin-top: 6px; }
 
 /* Fin options, anchored under the toggle rather than inside the topbar, so
    turning fins on never moves another control. */

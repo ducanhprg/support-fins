@@ -92,6 +92,11 @@
     <dt><i class="sw sw-pad"></i>Bed&nbsp;pad</dt> <dd id="s-pad">—</dd>
     <dt>Analysis</dt>                            <dd id="s-time">—</dd>
   </dl>
+  <!-- Overhang status (ui/status.js): one button per kind -- need support, held
+       by a fin, too small, too tight -- that flies the camera to the next one and
+       flashes it through the part. The caption says which one is showing. -->
+  <div id="s-status" class="status-list" role="group" aria-label="Overhangs by status" hidden></div>
+  <p id="s-status-cap" class="status-cap" aria-live="polite"></p>
   <!-- What the (i) opens: why this pose got the fins it did, and what it left
        bare. It used to be the button's title tooltip only -- a slow hover, nothing
        on click, nothing on touch -- for the one sentence that says why a part got

@@ -5,7 +5,8 @@
  */
 import * as THREE from 'three';
 import { buildTopology, analyze, DEFAULT_THRESHOLD, MIN_REGION_AREA } from '../overhangs.js';
-import { tightSlivers } from '../fins/tight.js';
+import { tightRegions, tightSlivers } from '../fins/tight.js';
+import { regionStates, renderStatus } from './status.js';
 import { el } from './dom.js';
 import { scene, controls, frame } from './scene.js';
 import { removeMode, cancelRemove, resetRemovals } from './remove.js';
@@ -39,6 +40,12 @@ const SHADE = {
   // unsupported, so it must still show -- amber, like the over-warn card
   small: new THREE.Color().setHex(0xffb454, THREE.SRGBColorSpace),
   bed: new THREE.Color().setHex(0x3f7fd0, THREE.SRGBColorSpace),
+  // an overhang a fin holds, once a build for this pose is in (ui/status.js):
+  // no longer a problem, so it stops being red
+  held: new THREE.Color().setHex(0x6cc4b0, THREE.SRGBColorSpace),
+  // too close above the part for any support (fins/tight.js): it prints as
+  // designed, so neither red nor the amber warning
+  tight: new THREE.Color().setHex(0xa99be6, THREE.SRGBColorSpace),
 };
 
 /**
@@ -151,14 +158,27 @@ export function paintOverhangs(res = lastResult) {
   if (!part || !topology || !res) return;
   const colors = part.geometry.getAttribute('color');
   const arr = colors.array;
-  for (let f = 0; f < topology.nFaces; f++) {
-    const c = res.kept[f] ? SHADE.over : res.over[f] && highlightSmall ? SHADE.small : res.onBed[f] ? SHADE.bed : SHADE.plain;
+  const paint = (f, c) => {
     for (let i = 0; i < 3; i++) {
       const o = f * 9 + i * 3;
       arr[o] = c.r; arr[o + 1] = c.g; arr[o + 2] = c.b;
     }
+  };
+  for (let f = 0; f < topology.nFaces; f++) {
+    paint(f, res.kept[f] ? SHADE.over : res.over[f] && highlightSmall ? SHADE.small : res.onBed[f] ? SHADE.bed : SHADE.plain);
+  }
+  // Status over the plain red/amber: held and too-tight regions, too-tight
+  // slivers. Only overhang faces are touched, so this costs nothing per frame.
+  regionStates(res).forEach((s, i) => {
+    if (s !== 'need') for (const f of res.regions[i].faces) paint(f, SHADE[s]);
+  });
+  if (highlightSmall) {
+    (res.slivers ?? []).forEach((g, i) => {
+      if (res.sliverTight?.[i]) for (const f of g.faces) paint(f, SHADE.tight);
+    });
   }
   colors.needsUpdate = true;
+  renderStatus(res, part, topology);
 
   const dropped = res.rawRegionCount - res.regions.length;
   // The slivers keep their own amber swatch, so the amber faces have a name even
@@ -209,7 +229,11 @@ export function shade() {
   const ms = performance.now() - t0;
   // Which slivers are joint-gap clearances: hundreds of probes on a big part, so
   // only once the pose settles, never per drag frame (paintOverhangs).
-  if (!gizmo.dragging) res.sliverTight = tightSlivers(topology, res, rotM3.elements);
+  if (!gizmo.dragging) {
+    res.sliverTight = tightSlivers(topology, res, rotM3.elements);
+    const tight = new Set(tightRegions(topology, res, rotM3.elements, res.regions.map((_, i) => i)));
+    res.regionTight = res.regions.map((_, i) => tight.has(i));
+  }
 
   // Drop the rotated part back onto the plate, centred over it -- but NOT mid-drag.
   // The rotate gizmo turns the part about part.position, so re-seating it every

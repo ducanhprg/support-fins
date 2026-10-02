@@ -220,6 +220,8 @@ export function analyze(topo, thresholdDeg = DEFAULT_THRESHOLD, rot = IDENTITY3)
 
   return {
     over, kept, onBed, regions,
+    // the overhangs too small to fin (painted amber), for the UI to sort further
+    slivers: raw.filter((g) => g.area < MIN_REGION_AREA),
     rawRegionCount: raw.length,
     restingCount, restingArea,
     overArea, bedArea, overFaceCount,

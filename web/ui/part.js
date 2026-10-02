@@ -5,6 +5,7 @@
  */
 import * as THREE from 'three';
 import { buildTopology, analyze, DEFAULT_THRESHOLD, MIN_REGION_AREA } from '../overhangs.js';
+import { tightSlivers } from '../fins/tight.js';
 import { el } from './dom.js';
 import { scene, controls, frame } from './scene.js';
 import { removeMode, cancelRemove, resetRemovals } from './remove.js';
@@ -181,13 +182,19 @@ export function paintOverhangs(res = lastResult) {
   // there are any (a clean pose too: the amber faces still need a name).
   // Settings > Display > "Highlight small overhangs" off hides the shading and this
   // card; the sliver count in the readout above stays.
+  //
+  // Slivers sitting just above the part (a print-in-place joint's clearance) are
+  // left out of the warning: no pose or support helps those, and they print as
+  // designed. Sorted only once a drag settles (shade() sets res.sliverTight), so
+  // mid-drag the card counts every sliver.
   const warn = el('over-warn');
-  if (dropped > 0 && highlightSmall) {
-    const one = dropped === 1;
-    warn.textContent = `⚠ ${dropped} overhang${one ? '' : 's'} shaded amber ${one ? 'is' : 'are'} `
-      + `too small for a fin (under ${MIN_REGION_AREA} mm² each), so ${one ? 'it prints' : 'they print'} `
-      + `unsupported this way up and may come out rough. Try Suggest orientation to point `
-      + `${one ? 'it' : 'them'} up.`;
+  const tight = res.sliverTight ? res.sliverTight.filter(Boolean).length : 0;
+  const loose = dropped - tight;
+  if (loose > 0 && highlightSmall) {
+    const one = loose === 1;
+    warn.textContent = `⚠ ${loose} small overhang${one ? '' : 's'} (amber, under ${MIN_REGION_AREA} mm²) `
+      + `${one ? 'is' : 'are'} too small for a fin and may print rough this way up. `
+      + 'Suggest orientation can point them up.';
   } else {
     warn.textContent = '';
   }
@@ -200,6 +207,9 @@ export function shade() {
   const t0 = performance.now();
   const res = analyze(topology, threshold, rotM3.elements);
   const ms = performance.now() - t0;
+  // Which slivers are joint-gap clearances: hundreds of probes on a big part, so
+  // only once the pose settles, never per drag frame (paintOverhangs).
+  if (!gizmo.dragging) res.sliverTight = tightSlivers(topology, res, rotM3.elements);
 
   // Drop the rotated part back onto the plate, centred over it -- but NOT mid-drag.
   // The rotate gizmo turns the part about part.position, so re-seating it every

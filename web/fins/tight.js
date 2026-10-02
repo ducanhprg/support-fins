@@ -25,28 +25,37 @@ export const tightGap = () => PROP.gap + PROP.footGap + PROP.minHeight;
  * where a wall stands, not a gap.
  */
 export function tightRegions(topo, result, rot, regionIdx) {
+  return regionIdx.filter((i) => isTight(topo, result, rot, result.regions[i].faces, PROBES));
+}
+
+/**
+ * The same question for analyze()'s slivers (result.slivers), as one flag per
+ * sliver. One probe each: they are small, and there can be hundreds -- the UI
+ * asks once a drag settles, not on every frame.
+ */
+export function tightSlivers(topo, result, rot) {
+  return (result.slivers ?? []).map((g) => isTight(topo, result, rot, g.faces, 1));
+}
+
+/** Do most of `probes` faces spread over `faces` have the part within tightGap() below? */
+function isTight(topo, result, rot, faces, probes) {
   const { pos } = topo, off = result.offset, limit = tightGap();
-  const out = [];
-  for (const i of regionIdx) {
-    const faces = result.regions[i].faces;
-    const step = Math.max(1, Math.floor(faces.length / PROBES));
-    let probed = 0, tight = 0;
-    for (let k = 0; k < faces.length; k += step) {
-      const o = faces[k] * 9;
-      let x = 0, y = 0, z = 0;
-      for (let j = 0; j < 9; j += 3) {
-        const px = pos[o + j], py = pos[o + j + 1], pz = pos[o + j + 2];
-        x += rot[0] * px + rot[3] * py + rot[6] * pz;
-        y += rot[1] * px + rot[4] * py + rot[7] * pz;
-        z += rot[2] * px + rot[5] * py + rot[8] * pz;
-      }
-      x = x / 3 + off.x; y = y / 3 + off.y; z = z / 3 + off.z;
-      probed++;
-      for (let d = STEP; d <= limit && z - d > 0; d += STEP) {
-        if (insidePart(topo, rot, off, x, y, z - d)) { tight++; break; }
-      }
+  const step = Math.max(1, Math.floor(faces.length / probes));
+  let probed = 0, tight = 0;
+  for (let k = 0; k < faces.length; k += step) {
+    const o = faces[k] * 9;
+    let x = 0, y = 0, z = 0;
+    for (let j = 0; j < 9; j += 3) {
+      const px = pos[o + j], py = pos[o + j + 1], pz = pos[o + j + 2];
+      x += rot[0] * px + rot[3] * py + rot[6] * pz;
+      y += rot[1] * px + rot[4] * py + rot[7] * pz;
+      z += rot[2] * px + rot[5] * py + rot[8] * pz;
     }
-    if (probed && tight * 2 >= probed) out.push(i);
+    x = x / 3 + off.x; y = y / 3 + off.y; z = z / 3 + off.z;
+    probed++;
+    for (let d = STEP; d <= limit && z - d > 0; d += STEP) {
+      if (insidePart(topo, rot, off, x, y, z - d)) { tight++; break; }
+    }
   }
-  return out;
+  return probed > 0 && tight * 2 >= probed;
 }

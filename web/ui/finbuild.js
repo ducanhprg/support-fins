@@ -91,7 +91,7 @@ function clearSpinner() {
   el('spinner').classList.remove('show');
 }
 
-function finOpts() {
+export function finOpts() {
   return { mode: finMode === 'draw' ? 'prop' : finMode,
            bedPad: el('bed-pad').value !== 'off',
            tines: el('tines').checked,

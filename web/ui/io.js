@@ -9,6 +9,7 @@ import { readThreeMF } from '../threemf.js';
 import { isStep, readStep, warmStep } from '../step.js';
 import { el } from './dom.js';
 import { part, setPart } from './part.js';
+import { cancelBatch, exportAll, finAll, summary } from './batch.js';
 
 export let importNote = '';   // what the 3MF/STEP reader had to decide (merge, unit, skips)
 
@@ -50,13 +51,23 @@ function mergeObjectPositions(objs) {
  * chosen objects, or null on cancel. Largest by triangle count is pre-selected
  * (the model, not its base/skirt); checking several merges them. Esc cancels,
  * Enter loads.
+ *
+ * "Fin all & export 3MF" fins every object where it sits instead (ui/batch.js),
+ * saves them in one file, and leaves the dialog open with a line per object, so
+ * one can still be loaded to turn and fine-tune.
  */
-function pickObjects(objects) {
+function pickObjects(objects, fileName = 'plate') {
   const modal = el('picker');
   const list = el('picker-list');
   const hint = el('picker-hint');
   const loadBtn = el('picker-load');
   const cancelBtn = el('picker-cancel');
+  const allBtn = el('picker-all');
+  const results = [];        // per object index: the summary line under its row
+  let busy = false;
+  cancelBtn.textContent = 'Cancel';
+  allBtn.textContent = `Fin all ${objects.length} & export 3MF`;
+  allBtn.disabled = false;
 
   const order = objects.map((_, i) => i).sort((a, b) => objects[b].tris - objects[a].tris);
   list.replaceChildren();
@@ -78,7 +89,10 @@ function pickObjects(objects) {
     const s = o.bbox.size.map((v) => Math.round(v));
     meta.textContent = `${o.tris.toLocaleString()} tris · ${s[0]}×${s[1]}×${s[2]} mm`;
     label.append(cb, name, meta);
-    li.append(label);
+    const res = document.createElement('span');
+    res.className = 'pk-res';
+    results[idx] = res;
+    li.append(label, res);
     list.append(li);
     boxes.push(cb);
   });
@@ -98,17 +112,47 @@ function pickObjects(objects) {
       modal.hidden = true;
       loadBtn.removeEventListener('click', onLoad);
       cancelBtn.removeEventListener('click', onCancel);
+      allBtn.removeEventListener('click', onAll);
       removeEventListener('keydown', onKey);
       resolve(result);
     }
-    function onLoad() { const sel = selected(); if (sel.length) close(sel); }
-    function onCancel() { close(null); }
+    function onLoad() { if (busy) return; const sel = selected(); if (sel.length) close(sel); }
+    function onCancel() { if (busy) cancelBatch(); close(null); }
     function onKey(e) {
       if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
       else if (e.key === 'Enter') { e.preventDefault(); onLoad(); }
     }
+    async function onAll() {
+      busy = true;
+      for (const c of [allBtn, loadBtn, ...boxes]) c.disabled = true;
+      for (const r of results) { r.textContent = ''; r.classList.remove('bad'); }
+      const done = await finAll(objects, (i, r) => {
+        if (!r) {
+          hint.textContent = `Finning ${i + 1} of ${objects.length}: ${objects[i].name}…`;
+          results[i].textContent = 'finning…';
+          return;
+        }
+        results[i].textContent = summary(r);
+        results[i].classList.toggle('bad', !!r.error || r.stats.unserved > r.stats.tight);
+      });
+      busy = false;
+      if (!done) return;                       // cancelled: the dialog is closing
+      for (const c of [allBtn, ...boxes]) c.disabled = false;
+      refresh();
+      const failed = done.filter((r) => r.error).length;
+      if (failed === done.length) {
+        hint.textContent = 'Nothing could be finned, so nothing was saved.';
+        return;
+      }
+      const out = exportAll(done, fileName);
+      hint.textContent = `Saved ${out}`
+        + (failed ? ` without the ${failed} that failed` : '')
+        + '. Load one to turn it and fine-tune, or close.';
+      cancelBtn.textContent = 'Close';
+    }
     loadBtn.addEventListener('click', onLoad);
     cancelBtn.addEventListener('click', onCancel);
+    allBtn.addEventListener('click', onAll);
     addEventListener('keydown', onKey);
   });
 }
@@ -119,9 +163,9 @@ function pickObjects(objects) {
  * position array STLLoader produces, so everything downstream (setPart, the
  * weld, the whole engine) is unchanged.
  */
-async function parseModel(buffer) {
+async function parseModel(buffer, fileName) {
   importNote = '';
-  if (isStep(buffer)) return parseStep(buffer);
+  if (isStep(buffer)) return parseStep(buffer, fileName);
   if (!isZip(buffer)) return loader.parse(buffer);
 
   const { objects, unit, skipped } = await readThreeMF(new Uint8Array(buffer));
@@ -130,7 +174,7 @@ async function parseModel(buffer) {
   // user chooses which body to fin rather than us merging distinct models.
   let chosen = objects;
   if (objects.length > 1) {
-    chosen = await pickObjects(objects);
+    chosen = await pickObjects(objects, fileName);
     if (!chosen) return null;               // cancelled: keep the current part
   }
 
@@ -157,7 +201,7 @@ async function parseModel(buffer) {
  * STEP goes through the CAD kernel (lazy: the first STEP of a session pays for
  * a ~7.6 MB download), then through the same picker as a multi-object 3MF.
  */
-async function parseStep(buffer) {
+async function parseStep(buffer, fileName) {
   const spinner = el('spinner');
   const label = spinner.lastChild.textContent;
   spinner.lastChild.textContent = 'reading STEP…';
@@ -172,7 +216,7 @@ async function parseStep(buffer) {
 
   let chosen = objects;
   if (objects.length > 1) {
-    chosen = await pickObjects(objects);
+    chosen = await pickObjects(objects, fileName);
     if (!chosen) return null;
   }
   const notes = ['tessellated at 0.01 mm'];
@@ -188,7 +232,7 @@ async function parseStep(buffer) {
 async function loadFile(file) {
   if (!file) return;
   try {
-    const geometry = await parseModel(await file.arrayBuffer());
+    const geometry = await parseModel(await file.arrayBuffer(), file.name);
     if (geometry) setPart(geometry, file.name);
   } catch (err) {
     console.error(err);
@@ -210,7 +254,7 @@ el('file').addEventListener('click', warmStep);
 export async function loadURL(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  const geometry = await parseModel(await res.arrayBuffer());
+  const geometry = await parseModel(await res.arrayBuffer(), url.split('/').pop());
   if (!geometry) return;                       // picker cancelled
   setPart(geometry, url.split('/').pop());
   // Drop ?stl= once it has been consumed: the path is nobody's business but the

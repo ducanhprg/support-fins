@@ -12,7 +12,7 @@
 
 import { WEB, MODELS, assert, assertClose, block, readSTL, buildTopology, analyze, rotX } from './_util.js';
 
-const { writeThreeMF, readThreeMF } = await import(`${WEB}threemf.js`);
+const { writeThreeMF, writeThreeMFObjects, readThreeMF } = await import(`${WEB}threemf.js`);
 const { zipStore } = await import(`${WEB}zip.js`);
 
 const REL = 'http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel';
@@ -81,6 +81,23 @@ Deno.test('3MF round trip: our own export reads back as the same geometry', asyn
   const { lo, hi } = bounds(r.positions);
   assert(lo.every((v) => v === 0), `min ${lo}, want 0,0,0`);
   assert(hi[0] === 1 && hi[1] === 1 && hi[2] === 2, `max ${hi}, want 1,1,2`);
+});
+
+Deno.test('3MF of a whole plate: each object comes back on its own, with its fins and its name', async () => {
+  // a plate finned at once (ui/batch.js): two objects, one with fins, one without
+  const shift = (tris, dx) => tris.map((p) => [p[0] + dx, p[1], p[2]]);
+  const fins = CUBE.map((p) => [p[0], p[1], p[2] + 1]);
+  const blob = writeThreeMFObjects([
+    { name: 'Body & "head"', partTris: CUBE, finTris: fins },
+    { name: 'Boot', partTris: shift(CUBE, 5), finTris: [] },
+  ], 'plate');
+  const r = await readThreeMF(new Uint8Array(await blob.arrayBuffer()));
+  assert(r.objects.length === 2, `${r.objects.length} objects, want 2`);
+  assert(r.objects[0].tris === (CUBE.length + fins.length) / 3, `body tris ${r.objects[0].tris}`);
+  assert(r.objects[1].tris === CUBE.length / 3, `boot tris ${r.objects[1].tris}`);
+  assert(r.objects[0].name === 'Body & "head"' && r.objects[1].name === 'Boot',
+    `names ${r.objects.map((o) => o.name)}`);
+  assert(r.objects[1].bbox.lo[0] === 5, `boot moved to x ${r.objects[1].bbox.lo[0]}`);
 });
 
 // --- units -----------------------------------------------------------------

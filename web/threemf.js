@@ -124,6 +124,48 @@ export function writeThreeMF(partTris, finTris, name = 'Support Fins') {
   ]);
 }
 
+const xmlAttr = (s) => String(s).replace(/[<>&"]/g,
+  (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+
+/**
+ * Several objects, each with its own fins, in one package (a whole plate finned
+ * at once, ui/batch.js). Each object is an assembly of its part and its fins,
+ * locked together exactly as writeThreeMF locks one, and gets its own build
+ * item and `name`, so a slicer's object list says which is which and each can
+ * be moved, arranged or deleted on its own.
+ *
+ * @param entries  [{ name, partTris, finTris }], print space, already laid out
+ *                 so they don't overlap
+ * @param name     written as the model Title
+ * @returns Blob   a .3mf package
+ */
+export function writeThreeMFObjects(entries, name = 'Support Fins') {
+  const objects = [], items = [];
+  let id = 0;
+  for (const e of entries) {
+    const label = xmlAttr(e.name ?? `Object ${items.length + 1}`);
+    const partId = ++id;
+    objects.push(`<object id="${partId}" type="model" name="${label}">${meshXML(e.partTris)}</object>`);
+    if (!e.finTris?.length) { items.push(partId); continue; }
+    const finId = ++id, asmId = ++id;
+    objects.push(`<object id="${finId}" type="model" name="${label} fins">${meshXML(e.finTris)}</object>`);
+    objects.push(`<object id="${asmId}" type="model" name="${label}"><components>`
+      + `<component objectid="${partId}"/><component objectid="${finId}"/></components></object>`);
+    items.push(asmId);
+  }
+  const model = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    `<model unit="millimeter" xml:lang="en-US" xmlns="${NS_CORE}">` +
+    '<metadata name="Application">Support Fins</metadata>' +
+    `<metadata name="Title">${xmlAttr(name)}</metadata>` +
+    `<resources>${objects.join('')}</resources>` +
+    `<build>${items.map((i) => `<item objectid="${i}"/>`).join('')}</build></model>`;
+  return zipStore([
+    { name: '[Content_Types].xml', data: CONTENT_TYPES },
+    { name: '_rels/.rels', data: ROOT_RELS },
+    { name: '3D/3dmodel.model', data: model },
+  ]);
+}
+
 // ---------------------------------------------------------------- 3MF reader
 
 /**
@@ -169,6 +211,14 @@ const UNIT_MM = {
  * Attribute parsing honours quotes, so a value containing '>' (legal, and Bambu
  * writes object names verbatim) does not cut the tag short.
  */
+// An attribute's escapes, decoded: an object named "Bee & Wings" is stored as
+// "Bee &amp; Wings" and showed up that way in the picker. Only values holding
+// an '&' get here, so the millions of vertex coordinates pay nothing.
+const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+const unescapeXML = (s) => s.replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (m, e) => (
+  e[0] !== '#' ? ENTITIES[e]
+    : String.fromCodePoint(e[1] === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10))));
+
 function scanXML(xml, onOpen, onClose) {
   let i = 0;
   const n = xml.length;
@@ -217,7 +267,7 @@ function scanXML(xml, onOpen, onClose) {
         while (p < n && !/[\s/>]/.test(xml[p])) p++;
         value = xml.slice(start, p);
       }
-      attrs[attr] = value;
+      attrs[attr] = value.includes('&') ? unescapeXML(value) : value;
     }
     onOpen(name, attrs, selfClosing);
     i = p;

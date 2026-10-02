@@ -830,6 +830,13 @@ html, body {
 #picker-list input { margin: 0; accent-color: var(--accent); align-self: center; }
 #picker-list .pk-name { flex: 1; color: var(--text); font-size: 13px; word-break: break-word; }
 #picker-list .pk-meta { color: var(--dim); font-size: 11px; white-space: nowrap; }
-.picker-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* what "Fin all" did for this object, under its row (ui/batch.js summary) */
+#picker-list .pk-res { display: block; padding: 0 10px 6px 34px; color: #6fcf8b; font-size: 11px; }
+#picker-list .pk-res:empty { display: none; }
+#picker-list .pk-res.bad { color: #ffb454; }
+.picker-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+/* The hint takes a line of its own once it says more than a few words ("Saved
+   ... Load one to ..."), instead of squeezing into a column beside three buttons. */
+#picker-hint { flex: 1 1 260px; }
 .picker-foot .note { margin: 0; font-size: 11px; color: var(--dim); }
 .picker-actions { display: flex; gap: 8px; flex-shrink: 0; }

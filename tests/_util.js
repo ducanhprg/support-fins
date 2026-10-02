@@ -2,8 +2,16 @@
 // --allow-read tests/` runs offline. The support engine is pure geometry, so
 // every test is: build some geometry, assert an invariant on the triangle soup.
 
+/** A file: URL as a path Deno.readFileSync can open. URL.pathname keeps a slash
+ *  before a Windows drive ("/C:/...") and leaves %20 in, so files under C:\ or a
+ *  folder with a space in its name didn't load. Imports take the URL form fine. */
+export const fsPath = (url) => {
+  const p = decodeURIComponent(url.pathname);
+  return /^\/[A-Za-z]:\//.test(p) ? p.slice(1) : p;
+};
+
 export const WEB = new URL('../web/', import.meta.url).pathname;
-export const MODELS = new URL('../prototype/stress/models/', import.meta.url).pathname;
+export const MODELS = fsPath(new URL('../prototype/stress/models/', import.meta.url));
 
 export const { buildTopology, analyze } = await import(`${WEB}overhangs.js`);
 export const fins = await import(`${WEB}fins.js`);

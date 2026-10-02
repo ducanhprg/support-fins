@@ -19,13 +19,13 @@
 // (fins.js applyTunables), so reading defaults back from FIN / PAD / PROP would carry
 // one scene's material into the next -- the PETG scene did, into four PLA goldens.
 
-import { analyze, loadModel, fins } from './_util.js';
+import { analyze, loadModel, fins, fsPath } from './_util.js';
 import * as THREE from '../web/vendor/three/three.core.js';
 
 const { buildFins } = fins;
 const { drawnWall } = await import('../web/draw.js');
 const { MATERIAL } = await import('../web/materials.js');
-const DIR = new URL('./golden/', import.meta.url).pathname;
+const DIR = fsPath(new URL('./golden/', import.meta.url));
 const UPDATE = Deno.env.get('UPDATE_GOLDEN') === '1';
 
 /** The site's tunables for a material, the form otherwise untouched (finOpts). */

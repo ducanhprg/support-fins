@@ -16,7 +16,7 @@
 // The fins are built the way the CLI builds them (plugins/shared/engine
 // computeFins: soup seated in float64, the material's clearances), so the counts
 // here are the counts of the fins the builder merges.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const REPO = new URL('../../../../', import.meta.url);
 const imp = (p) => import(new URL(p, REPO).href);
@@ -37,6 +37,7 @@ const only = flag('--only')?.split(',').map((s) => s.trim());
 const suggest = new Set(flag('--suggest')?.split(',').map((s) => s.trim()) ?? []);
 const projectLayer = Number(info.process.layer_height);
 const paintDir = flag('--paint');
+if (paintDir) mkdirSync(paintDir, { recursive: true });
 const MATERIALS = { PLA: 'pla', PETG: 'petg' };      // the engine's two; others fin as PLA, flagged
 // An overhang this close to the plate prints on the first layers' own squish (the
 // engine builds nothing under PROP.minHeightSquat, 0.6 mm, for that reason), so it
@@ -49,6 +50,57 @@ const NEAR_BED = 2.0;   // mm
 // ZKULL on the U1: body 89%, hat 95%, head 97%. Below it, the slicer's supports
 // would do most of the work anyway, and two systems on one piece isn't worth it.
 const FINS_HOLD = 2 / 3;
+// Why the engine built no fin under a spot (web/prop.js regionSkips), in words.
+const WHY = {
+  noLine: 'curved: no straight run for a wall', stub: 'too short for a wall',
+  blocked: 'the part stands in the way of a wall', wanders: 'its edge curves too much for a wall',
+  weld: 'a wall would weld into a hole', buried: 'a wall would stand inside the part',
+  degenerate: 'no usable shape', sliver: 'too small for a wall',
+  noTrack: 'no wall run fits under it: the part is in the way, or every run is too short',
+};
+// A spot this close to horizontal (the overhang's downward normal, area-weighted)
+// is a ceiling: an even block of support gives it the flattest underside.
+const CEILING = 0.94;   // cos 20 deg
+
+// The support for the spots fins can't hold: kind and style from the spots'
+// shape, height and what's under them; gap from the interface and the layer.
+function supportRecipe(spots, { manual, layer, process, iface }) {
+  const ov = {}, why = [];
+  const ceilings = spots.filter((x) => x.flat >= CEILING && x.area >= 100);
+  if (spots.every((x) => x.over === 'plate' && x.top <= 15) && ceilings.length === spots.length) {
+    ov.support_type = manual ? 'normal(manual)' : 'normal(auto)'; ov.support_style = 'grid';
+    why.push('every spot is a broad flat ceiling low over the plate: a grid block gives the evenest underside');
+  } else {
+    ov.support_type = manual ? 'tree(manual)' : 'tree(auto)';
+    if (ceilings.some((x) => x.area >= 200)) {
+      ov.support_style = 'tree_hybrid';
+      why.push(`a ${Math.max(...ceilings.map((x) => x.area))} mm² flat ceiling among other spots: hybrid trees put an even block under it and branches elsewhere`);
+    } else {
+      ov.support_style = 'tree_organic';
+      why.push(spots.some((x) => x.over === 'part')
+        ? 'curved spots, some over the part: organic trees reach them round the model and touch little else'
+        : 'curved or small spots: organic trees touch only them and peel off cleanly');
+    }
+  }
+  // gap: zero only with the interface in a low-adhesion material; otherwise the
+  // preset's gap, rounded UP to whole layers (the slicer does, so say so)
+  const top = Number(process.support_top_z_distance ?? layer);
+  if (iface) {
+    why.push(`top Z 0 with the interface in slot ${iface.slot} (${iface.type}): set project-wide (playbook section 3)`);
+  } else {
+    const whole = Math.max(1, Math.ceil(top / layer - 1e-6)) * layer;
+    if (Math.abs(whole - top) > 1e-6) {
+      ov.support_top_z_distance = whole.toFixed(2);
+      why.push(`top Z ${top} rounds up to ${whole.toFixed(2)} at ${layer} mm layers; written as it will print`);
+    } else why.push(`top Z ${top} (the preset's, one layer${top / layer > 1.5 ? 's' : ''} at ${layer} mm): no second material for a zero gap`);
+  }
+  if (spots.some((x) => x.over === 'part') && Number(process.support_interface_bottom_layers ?? 0) === 0) {
+    ov.support_interface_bottom_layers = '2';
+    why.push('trees land on the part: 2 bottom interface layers keep the landing marks off it');
+  }
+  for (const k of Object.keys(ov)) if (k !== 'support_type' && process[k] === ov[k]) delete ov[k];
+  return { overrides: ov, why };
+}
 // A piece is tippy when it's tall for the foot it stands on: height over the
 // foot's width (sqrt of the contact area) beyond this, or under 50 mm² at all.
 // Jack (150 mm on 56 mm²: 20x) and ZKULL's body (74 mm on 67 mm²: 9x) need a
@@ -129,8 +181,19 @@ for (let i = 0; i < m.objects.length; i++) {
       for (let d = 0.3; d < z - 0.05; d += 0.5) if (insidePart(topo, I, off, x, y, z - d)) { hit = true; break; }
       if (!hit) overPlate++;
     }
+    let fa = 0, fn = 0, x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const f of g.faces) {
+      fa += topo.area[f]; fn += -topo.nrm[f * 3 + 2] * topo.area[f];
+      for (let j = 0; j < 9; j += 3) {
+        x0 = Math.min(x0, topo.pos[f * 9 + j]); x1 = Math.max(x1, topo.pos[f * 9 + j]);
+        y0 = Math.min(y0, topo.pos[f * 9 + j + 1]); y1 = Math.max(y1, topo.pos[f * 9 + j + 1]);
+      }
+    }
+    const reasons = Object.keys(b.regionSkips?.[ri] ?? {});
     return { region: ri, area: +g.area.toFixed(0), z: +(zs / n).toFixed(1), top: +top.toFixed(1),
-             over: tightSet.has(ri) ? 'tight' : overPlate * 2 >= n ? 'plate' : 'part' };
+             over: tightSet.has(ri) ? 'tight' : overPlate * 2 >= n ? 'plate' : 'part',
+             flat: +(fn / Math.max(fa, 1e-9)).toFixed(2), span: +Math.max(x1 - x0, y1 - y0).toFixed(0),
+             no_fin: reasons.length ? reasons.map((r) => WHY[r] ?? r) : ['no wall could be placed under it'] };
   });
   for (const x of bare) if (x.over === 'plate' && x.top < NEAR_BED) x.over = 'bed';
   // 'tight' (print-in-place gaps: a support would fuse them) and 'bed' (the first
@@ -165,6 +228,12 @@ for (let i = 0; i < m.objects.length; i++) {
       rot_xyz: euler(c.rot), height: +c.height.toFixed(1), bed_area: +c.bedArea.toFixed(0),
       over_area: +c.overArea.toFixed(0), regions: c.regions, coverage: +c.coverage.toFixed(2), seating: c.seating })) };
   }
+  if (verdict === 'fins+paint' || verdict === 'supports') {
+    const spots = bare.filter((x) => x.over === 'plate' || x.over === 'part');
+    const iface = (info.interface_candidates ?? []).find((c) => c.loadable) ?? null;
+    row.support = supportRecipe(spots.length ? spots : [{ area: 0, flat: 0, top: 99, over: 'plate' }],
+                                { manual: verdict === 'fins+paint', layer: layerHeight, process: info.process, iface });
+  }
   if (paintDir && verdict === 'fins+paint') {
     // The faces of every overhang the fins leave bare (not the tight or near-bed
     // ones), plus the bottom 1 mm of each loose piece. Face indices are the
@@ -186,6 +255,14 @@ for (let i = 0; i < m.objects.length; i++) {
     + `fins ${walls}w/${row.fins.tines}t ${row.fins.grams}g  needs support: ${bareTxt}${skip.length ? `  (not counted: ${skip.join(', ')})` : ''}`
     + `${row.floating.length ? `  LOOSE ${JSON.stringify(row.floating)}` : ''}`
     + `  => ${verdict}${verdict === 'fins+paint' ? ` (fins hold ${Math.round(held * 100)}%${row.paint ? `, ${row.paint.faces} faces to paint` : ''})` : ''}`);
+  for (const x of row.bare.filter((y) => y.over === 'plate' || y.over === 'part')) {
+    console.log(`     spot ${x.area}mm² ${x.z}-${x.top}mm over the ${x.over}, ${x.flat >= CEILING ? 'flat ceiling' : `slope ${Math.round(Math.acos(Math.min(1, x.flat)) * 180 / Math.PI)}° off flat`}, `
+      + `${x.span} mm across: no fin (${x.no_fin.join('; ')})`);
+  }
+  if (row.support) {
+    console.log(`     support: ${Object.entries(row.support.overrides).map(([k, v]) => `${k}=${v}`).join(' ')}`);
+    for (const w of row.support.why) console.log(`       - ${w}`);
+  }
   if (row.suggest) {
     console.log(`     now:   h ${row.size[2]} bed ${row.bed_area} over ${row.over_area} regions ${row.regions} (${row.seating})`);
     for (const c of row.suggest.candidates) {

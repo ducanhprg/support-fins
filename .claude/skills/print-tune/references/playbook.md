@@ -47,6 +47,18 @@ accelerations, a support style that overrides the user's): an override set to
 
 ## 2. Per piece: fins, fins plus painted supports, slicer supports, or nothing
 
+The order of the decision, for every piece (the user's rule: support is the last
+option):
+
+1. **Does anything need support?** Not an overhang near the bed (its top under
+   2 mm), not one in a tight gap over the part, not a sliver under 12 mm².
+2. **Where?** Each remaining spot: area, height, over the plate or over the part,
+   how flat, how wide (the analysis prints a `spot` line for each).
+3. **Can a fin hold it?** The engine tries; when it can't, the spot line says why
+   (curved with no straight run, too short, the part in the way...).
+4. **Only then a support,** on those spots alone, and the right one for them
+   (section 3: kind, style, gap).
+
 `analyze_pieces.mjs` gives each piece a verdict. Trust it, and know what's behind it:
 
 - **fins-only**: every real overhang is held by a fin, there's no loose piece, and
@@ -109,6 +121,25 @@ traded for another edge is not, however much overhang it saves (ZKULL's head:
 doesn't rotate objects; the user turns it in the slicer and re-runs.
 
 ## 3. Supports for the pieces that keep them
+
+**Kind and style.** The analysis prints a `support:` line per piece with its pick
+and the reasons; put its overrides in the plan. What it weighs:
+
+- **tree, organic** (the profiles' default for figures): curved or small spots,
+  and anything over the part. Branches reach round the model, touch only the spot,
+  and peel off cleanly; organic trees land softly where they must stand on the part.
+- **tree, hybrid**: a broad flat ceiling (within 20° of level, 200 mm² or more)
+  among other spots. It puts an even block under the flat one and branches elsewhere.
+- **normal (grid)**: every spot is a broad flat ceiling low over the plate (top
+  under 15 mm). A grid block gives the evenest underside there, and trees gain
+  nothing.
+- One kind per piece: the slicer holds `support_type` per object. `(manual)` on a
+  fins+paint piece, `(auto)` on a supports piece.
+
+**Gap.** Zero only with the interface in a low-adhesion second material (below).
+Otherwise the preset's top Z, a whole number of layers (the slicer rounds up; a
+fractional value is written as what it will print, and said). Trees standing on the
+part get 2 bottom interface layers if the preset has none.
 
 **Build plate only.** The profiles default to supports from the build plate only.
 Turn that off (`support_on_build_plate_only: 0`) when a "supports" or "fins+paint"

@@ -62,7 +62,9 @@ would build at this pose (walls, tines, grams), every overhang that still needs 
 support (area, height, over the plate or over the part), what's not counted (too
 tight for any support, or near the bed), loose pieces, and a verdict: `fins-only`,
 `fins+paint` (fins hold most of it; `--paint` writes the triangles of the spots
-they leave, `<work>/paint-<name>.json`), `supports` or `none-needed`. The fins are built exactly as the CLI builds them,
+they leave, `<work>/paint-<name>.json`), `supports` or `none-needed`. Under a piece
+that keeps any support: one `spot` line per spot (where, how flat, why no fin holds
+it) and a `support:` line with the kind, style and gap it should get and why. The fins are built exactly as the CLI builds them,
 with the piece's own material and layer height.
 
 To rank other poses for pieces standing on a point or an edge with little
@@ -76,8 +78,10 @@ twice. Recommend a turn only when it's clearly better; see the playbook.
 Apply `references/playbook.md` to the inspection and the analysis. Typical outcome:
 
 - `fins-only` pieces: fins merged, `enable_support: 0` for that piece;
-- `fins+paint` pieces: fins merged, `support_type: tree(manual)` for that piece,
-  and its paint file as `paint_supports`: the slicer supports only those spots;
+- `fins+paint` pieces: fins merged, the `support:` line's overrides (a manual
+  support type) for that piece, and its paint file as `paint_supports`: the slicer
+  supports only those spots;
+- `supports` pieces: the `support:` line's overrides;
 - `none-needed` pieces: left alone;
 - supports from everywhere if any `supports` piece has an overhang over the part;
 - the support interface in the other material when a free slot holds it
@@ -144,7 +148,7 @@ Tuned: <path to "- tuned.3mf">  (verified; not sliced)
 | Piece | What it gets | Why |
 |---|---|---|
 | Legs | fins (7 walls, 1.1 g), no slicer supports | fins hold its only overhang |
-| Head | fins (14 walls), supports painted on the chin only, brim | fins hold 97%; 8 mm² on the bed |
+| Head | fins (14 walls), organic tree supports painted on the chin only, brim | fins hold 97%; the chin is too short for a wall; 8 mm² on the bed |
 
 Settings changed (each with its reason): ...
 Kept from your preset: ...

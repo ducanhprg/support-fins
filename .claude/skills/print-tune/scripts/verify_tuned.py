@@ -6,15 +6,19 @@ would read it: nothing but the planned changes may differ.
     python verify_tuned.py ORIGINAL.3mf TUNED.3mf PLAN.json
 
 Checks: the zip reads; the same entries in the same order; only the mesh files
-that got fins and the two settings files changed; changed XML parses; the
-settings diff is exactly the plan's; per-object overrides are the plan's; plates
-are unchanged; and (via verify_fins.mjs, the engine's own reader) every merged
-fin sits exactly where the engine placed it. Exit 1 on any failure.
+that got fins or painted supports and the two settings files changed; changed
+XML parses; the settings diff is exactly the plan's; per-object overrides are the
+plan's; plates are unchanged; exactly the planned triangles are painted as
+support enforcers (plus whatever the original already had); and (via
+verify_fins.mjs, the engine's own reader) every merged fin sits exactly where the
+engine placed it. Exit 1 on any failure.
 """
 import json, os, re, subprocess, sys, zipfile
 import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import build_tuned as bt   # noqa: E402  (the builder's own mesh resolution)
 
 
 def main():
@@ -37,7 +41,8 @@ def main():
     changed = [n for n in A.namelist() if A.read(n) != B.read(n)]
     allowed = {'Metadata/project_settings.config', 'Metadata/model_settings.config'}
     meshes = [n for n in changed if n not in allowed]
-    check(all(n.startswith('3D/Objects/') for n in meshes) and len(meshes) <= sum(1 for s in OBJ.values() if s.get('fins')),
+    check(all(n.startswith('3D/Objects/') for n in meshes)
+          and len(meshes) <= sum(1 for s in OBJ.values() if s.get('fins') or s.get('paint_supports')),
           f'changed only settings + fin meshes: {changed}')
     for n in changed:
         if n.endswith(('.model', '.config')) and n != 'Metadata/project_settings.config':
@@ -62,6 +67,24 @@ def main():
         got = dict(re.findall(r'<metadata key="([^"]+)" value="([^"]*)"', m.group(1))) if m else {}
         ov = {k: (None if v is None else str(v)) for k, v in spec.get('overrides', {}).items()}
         check(all(got.get(k) == v for k, v in ov.items()), f'{name}: overrides {ov}')   # None: removed
+
+    comps = bt.components(A.read('3D/3dmodel.model').decode('utf-8'))
+    ca, cb = {}, {}
+    for name, spec in OBJ.items():
+        if not spec.get('paint_supports'):
+            continue
+        oid = re.search(r'<object id="(\d+)">\s*<metadata key="name" value="' + re.escape(name) + r'"/>', ma).group(1)
+        want = set(json.load(open(os.path.join(os.path.dirname(os.path.abspath(plan_path)), spec['paint_supports']),
+                                  encoding='utf-8'))['faces'])
+        had, got, start = set(), set(), 0
+        for path, mesh_oid, n, skip in bt.object_meshes(A, comps, oid, ca):
+            if skip:
+                continue
+            cb.setdefault(path, B.read(path).decode('utf-8'))
+            had |= {start + i for i in bt.painted(ca[path], mesh_oid)}
+            got |= {start + i for i in bt.painted(cb[path], mesh_oid) if i < n}
+            start += n
+        check(got == had | want, f'{name}: {len(got - had)} triangles newly painted as support, the plan has {len(want - had)}')
 
     pairs = [f'{n}={os.path.join(os.path.dirname(os.path.abspath(plan_path)), s["fins"])}' for n, s in OBJ.items() if s.get('fins')]
     if pairs:

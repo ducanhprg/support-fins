@@ -53,7 +53,7 @@ project already answered.
 ## 3. Analyze every piece
 
 ```
-node --max-old-space-size=12000 .claude/skills/print-tune/scripts/analyze_pieces.mjs "<project>.3mf" --inspect <work>/project.json --json <work>/pieces.json
+node --max-old-space-size=12000 .claude/skills/print-tune/scripts/analyze_pieces.mjs "<project>.3mf" --inspect <work>/project.json --json <work>/pieces.json --paint <work>
 ```
 
 About 30-60 s per million triangles. One line per piece: height and bed contact
@@ -61,7 +61,8 @@ About 30-60 s per million triangles. One line per piece: height and bed contact
 would build at this pose (walls, tines, grams), every overhang that still needs a
 support (area, height, over the plate or over the part), what's not counted (too
 tight for any support, or near the bed), loose pieces, and a verdict: `fins-only`,
-`supports` or `none-needed`. The fins are built exactly as the CLI builds them,
+`fins+paint` (fins hold most of it; `--paint` writes the triangles of the spots
+they leave, `<work>/paint-<name>.json`), `supports` or `none-needed`. The fins are built exactly as the CLI builds them,
 with the piece's own material and layer height.
 
 To rank other poses for pieces standing on a point or an edge with little
@@ -75,6 +76,8 @@ twice. Recommend a turn only when it's clearly better; see the playbook.
 Apply `references/playbook.md` to the inspection and the analysis. Typical outcome:
 
 - `fins-only` pieces: fins merged, `enable_support: 0` for that piece;
+- `fins+paint` pieces: fins merged, `support_type: tree(manual)` for that piece,
+  and its paint file as `paint_supports`: the slicer supports only those spots;
 - `none-needed` pieces: left alone;
 - supports from everywhere if any `supports` piece has an overhang over the part;
 - the support interface in the other material when a free slot holds it
@@ -101,7 +104,9 @@ Write `<work>/plan.json` (fins paths relative to the plan):
   "objects": {
     "Legs": {"overrides": {"enable_support": "0"}, "fins": "fins-Legs.stl",
              "fin_layer_height": 0.16, "fin_material": "petg"},
-    "Head": {"overrides": {"brim_type": "outer_only"}},
+    "Head": {"overrides": {"support_type": "tree(manual)", "brim_type": "outer_only"},
+             "fins": "fins-Head.stl", "fin_layer_height": 0.16, "fin_material": "petg",
+             "paint_supports": "paint-Head.json"},
     "jack1a.stl": {"overrides": {"support_style": null}}
   }
 }
@@ -120,7 +125,8 @@ python .claude/skills/print-tune/scripts/verify_tuned.py "<project>.3mf" "<proje
 
 The builder writes `<project> - tuned.3mf` beside the original, copying every entry
 it doesn't change byte for byte. It refuses a zero gap without a low-adhesion
-interface material, fins cut for the wrong layer height, and writing over the input.
+interface material, fins cut for the wrong layer height, fins on a piece whose
+automatic supports are on, and writing over the input.
 If it refuses, the plan is wrong: fix the plan, don't work around the guard.
 
 The verifier checks the result as a slicer would read it: only the planned
@@ -138,7 +144,7 @@ Tuned: <path to "- tuned.3mf">  (verified; not sliced)
 | Piece | What it gets | Why |
 |---|---|---|
 | Legs | fins (7 walls, 1.1 g), no slicer supports | fins hold its only overhang |
-| Head | tree supports, PLA interface, brim | dome overhangs fins can't reach; 8 mm² on the bed |
+| Head | fins (14 walls), supports painted on the chin only, brim | fins hold 97%; 8 mm² on the bed |
 
 Settings changed (each with its reason): ...
 Kept from your preset: ...

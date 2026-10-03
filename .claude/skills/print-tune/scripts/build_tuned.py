@@ -14,12 +14,20 @@ PLAN.json:
   "objects": {
     "Legs": {"overrides": {"enable_support": "0"},           # model_settings.config, per object
              "fins": "fins-Legs.stl",                         # CLI --fins-only output, plate coords
-             "fin_layer_height": 0.16, "fin_material": "petg"}
+             "fin_layer_height": 0.16, "fin_material": "petg"},
+    "Head": {"overrides": {"support_type": "tree(manual)"},
+             "fins": "fins-Head.stl", "fin_layer_height": 0.16, "fin_material": "pla",
+             "paint_supports": "paint-Head.json"}                # analyze_pieces.mjs --paint
   }
 }
 
 An override set to null removes that key from the object: a designer's per-object
 setting that shouldn't follow the print to another machine.
+
+paint_supports marks the listed triangles (the object's own, in file order) as
+support enforcers, as the slicer's support-painting tool would ("4" on the
+triangle). With a manual support type the slicer then supports only those: the
+spots the fins leave bare.
 
 Refuses, rather than writes a file that would print badly:
   - a project for a printer the user's profiles don't cover (only the X2D and the
@@ -27,6 +35,10 @@ Refuses, rather than writes a file that would print badly:
   - a zero top Z gap whose interface filament is not a different, low-adhesion
     material from every object it would touch (supports would weld on);
   - fins cut for a layer height the object doesn't print at (tines must be one layer);
+  - fins on an object whose automatic supports are on: the slicer doesn't know fins
+    exist and would grow supports between them (turn its supports off, or make
+    them manual and paint the spots the fins leave);
+  - painted supports on an object whose supports are off (nothing would print);
   - writing over the input.
 """
 import argparse, json, os, re, struct, sys, zipfile
@@ -112,6 +124,61 @@ def merge_fins(mesh_xml, mesh_object_id, tris, to_local):
     return mesh_xml[:m.start()] + new + mesh_xml[m.end():], len(verts), len(faces)
 
 
+SKIP_TYPES = ('support', 'surface', 'other')   # web/threemf.js skips these meshes too
+
+
+def components(root):
+    """Root object id -> [(part path, mesh object id, component transform or None)]."""
+    comps = {}
+    for m in re.finditer(r'<object id="(\d+)"[^>]*>\s*<components>(.*?)</components>', root, re.S):
+        comps[m.group(1)] = [(c.group(1).lstrip('/'), c.group(2), mat(c.group(3)) if c.group(3) else None)
+                             for c in re.finditer(r'<component p:path="([^"]+)" objectid="(\d+)"[^>]*?(?:transform="([^"]+)")?\s*/?>',
+                                                  m.group(2))]
+    return comps
+
+
+def object_meshes(zin, comps, oid, cache):
+    """The mesh objects an object's triangles come from, in the order the engine
+    reads them (web/threemf.js emitObject): [(path, mesh_oid, n_triangles, skipped)]."""
+    out = []
+    for path, mesh_oid, _ in comps[oid]:
+        if path not in cache:
+            cache[path] = zin.read(path).decode('utf-8')
+        m = re.search(r'<object id="' + re.escape(mesh_oid) + r'"([^>]*)>(.*?)</object>', cache[path], re.S)
+        assert m, f'mesh object {mesh_oid} not found in {path}'
+        t = re.search(r'type="([^"]+)"', m.group(1))
+        out.append((path, mesh_oid, m.group(2).count('<triangle '), bool(t and t.group(1) in SKIP_TYPES)))
+    return out
+
+
+def mesh_block(xml, mesh_oid):
+    m = re.search(r'<object id="' + re.escape(mesh_oid) + r'"[^>]*>.*?</object>', xml, re.S)
+    assert m, f'mesh object {mesh_oid} not found'
+    return m
+
+
+def paint_triangles(xml, mesh_oid, indices):
+    """Mark triangles `indices` (0-based, this mesh's own order) as support enforcers."""
+    m = mesh_block(xml, mesh_oid)
+    want, k = set(indices), [0]
+
+    def one(t):
+        i = k[0]
+        k[0] += 1
+        if i not in want:
+            return t.group(0)
+        tag = re.sub(r'\s+paint_supports="[^"]*"', '', t.group(0))
+        return tag[:-2].rstrip() + ' paint_supports="4"/>'
+    block = re.sub(r'<triangle [^>]*/>', one, m.group(0))
+    return xml[:m.start()] + block + xml[m.end():]
+
+
+def painted(xml, mesh_oid):
+    """Indices of this mesh's triangles painted as whole-triangle enforcers."""
+    block = mesh_block(xml, mesh_oid).group(0)
+    return [i for i, t in enumerate(re.findall(r'<triangle [^>]*/>', block)) if 'paint_supports="4"' in t]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('project')
@@ -176,14 +243,45 @@ def main():
                 assert pair in LOW_ADHESION, (f'interface slot {islot} is {imat}, and {name!r} prints in '
                                               f'{family(types[s - 1])}: they bond, a zero gap would weld')
 
+    # --- fins / painting: supports the slicer adds must not land between fins ---
+    def effective(name, key):
+        ov = OBJ.get(name, {}).get('overrides', {})
+        if key in ov:
+            return ov[key] if ov[key] is not None else merged.get(key)
+        return objects[name]['meta'].get(key, merged.get(key))
+    for name, spec in OBJ.items():
+        on = effective(name, 'enable_support') == '1'
+        manual = (effective(name, 'support_type') or '').endswith('(manual)')
+        if spec.get('fins'):
+            assert not on or manual, (f'{name!r} gets fins but its automatic supports are on: the slicer would '
+                                      'grow supports between the fins. Set its enable_support 0, or its '
+                                      'support_type to tree(manual) and paint what the fins leave bare')
+        if spec.get('paint_supports'):
+            assert on, f'{name!r} has painted supports but its supports are off: nothing would print them'
+
     # --- fins: resolve where each object's mesh lives and its plate placement ---
     items = {m.group(1): mat(m.group(2)) for m in re.finditer(r'<item objectid="(\d+)"[^>]*?transform="([^"]+)"', root)}
-    comps = {}
-    for m in re.finditer(r'<object id="(\d+)"[^>]*>\s*<components>(.*?)</components>', root, re.S):
-        comps[m.group(1)] = [(c.group(1).lstrip('/'), c.group(2), mat(c.group(3)) if c.group(3) else None)
-                             for c in re.finditer(r'<component p:path="([^"]+)" objectid="(\d+)"[^>]*?(?:transform="([^"]+)")?\s*/?>',
-                                                  m.group(2))]
-    changed, report = {}, []
+    comps = components(root)
+    changed, report, cache = {}, [], {}
+    for name, spec in OBJ.items():
+        if not spec.get('paint_supports'):
+            continue
+        o = objects[name]
+        paint = json.load(open(os.path.join(plan_dir, spec['paint_supports']), encoding='utf-8'))
+        meshes = object_meshes(zin, comps, o['id'], cache)
+        total = sum(n for _, _, n, skip in meshes if not skip)
+        assert paint['tris'] == total, (f'{name!r}: the paint list was made for {paint["tris"]} triangles, '
+                                        f'the object has {total}: re-run the analysis on this project')
+        start = 0
+        for path, mesh_oid, n, skip in meshes:
+            if skip:
+                continue
+            own = [f - start for f in paint['faces'] if start <= f < start + n]
+            if own:
+                xml = changed[path].decode('utf-8') if path in changed else cache[path]
+                changed[path] = paint_triangles(xml, mesh_oid, own).encode('utf-8')
+            start += n
+        report.append(f'support painted on {len(paint["faces"])} triangles of {name!r}')
     for name, spec in OBJ.items():
         if not spec.get('fins'):
             continue

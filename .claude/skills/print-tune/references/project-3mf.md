@@ -40,3 +40,14 @@ doesn't fit them.
   `filament_map_mode` decide which nozzle each slot uses (Auto For Flush is fine).
 - **Units**: `<model unit="millimeter">`. The reader converts other units; Bambu
   and Orca always write mm.
+
+## Support painting
+
+The slicer's support-painting tool stores its marks on the mesh triangles in
+`3D/Objects/*.model`: `<triangle v1=".." v2=".." v3=".." paint_supports="4"/>` is a
+whole triangle painted as an enforcer, `"8"` a blocker; longer hex strings are
+triangles the brush split (PrusaSlicer's TriangleSelector encoding, kept by Bambu
+Studio and Orca). With a per-object `support_type` of `tree(manual)` or
+`normal(manual)` the slicer supports only enforcers. Triangle order is file order,
+the order `web/threemf.js` reads them, so the engine's face indices are the
+triangles' positions in the object's mesh (or meshes, in component order).

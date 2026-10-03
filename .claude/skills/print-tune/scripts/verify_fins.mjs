@@ -17,7 +17,8 @@ const m = await readThreeMF(new Uint8Array(readFileSync(file)));
 let bad = 0;
 for (const pair of pairs) {
   const [name, stl] = pair.split('=');
-  const obj = m.objects.find((o) => o.name === name);
+  // the reader drops a file extension from object names ("HAT.stl" -> "HAT")
+  const obj = m.objects.find((o) => o.name === name || o.name === name.replace(/\.(stl|3mf|obj|step|stp)$/i, ''));
   if (!obj) { console.log(`${name}: NOT FOUND in ${file}`); bad++; continue; }
   const fins = readSTL(new Uint8Array(readFileSync(stl)));
   const tail = obj.positions.subarray(obj.positions.length - fins.length);

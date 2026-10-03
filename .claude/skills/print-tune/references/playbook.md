@@ -45,17 +45,26 @@ designer's own advice) and drop the ones that are about their machine (speeds,
 accelerations, a support style that overrides the user's): an override set to
 `null` in the plan removes it.
 
-## 2. Per piece: fins, slicer supports, or nothing
+## 2. Per piece: fins, fins plus painted supports, slicer supports, or nothing
 
 `analyze_pieces.mjs` gives each piece a verdict. Trust it, and know what's behind it:
 
 - **fins-only**: every real overhang is held by a fin, there's no loose piece, and
   at least one wall was built. Plan: merge the fins into that piece and set its
   `enable_support` to `0`. This is the tool's whole point: no tree supports, no scars.
-- **supports**: some overhang no fin can reach (a curved roof, a ledge with the part
-  in the way, an overhang over the part itself), or a loose piece. Plan: leave the
-  piece to the slicer's supports, and don't add fins to it. The slicer doesn't know
-  fins exist; it would grow tree supports between the fin walls as well.
+- **fins+paint**: fins hold most of the overhang (2/3 of the area or more), and a
+  few spots stay bare: a dome, a hem low over the plate, an overhang over the part.
+  Plan: merge the fins, set that piece's `support_type` to `tree(manual)`, and paint
+  the bare spots as support enforcers (`analyze_pieces.mjs --paint` writes the
+  triangles, the plan's `paint_supports` paints them). In manual mode the slicer
+  supports only what's painted, so nothing grows between the fins. This is what the
+  user wants on big figures: on ZKULL's U1 plate automatic tree supports filled the
+  head, hood and hat, and they asked for fins instead (body 89%, hat 95%, head 97%
+  held by fins; the rest painted).
+- **supports**: fins hold less than 2/3, or build nothing. Plan: leave the piece to
+  the slicer's automatic supports, and don't add fins to it. The slicer doesn't know
+  fins exist; with automatic supports it would grow tree supports between the fin
+  walls as well (`build_tuned.py` refuses fins on a piece with automatic supports).
 - **none-needed**: nothing to support.
 
 Not counted: overhangs *too tight* for any support (the part sits within ~2 mm
@@ -69,15 +78,19 @@ case: the engine ignores slivers under 12 mm² that the slicer may still want to
 hold. If the slicer is likely to add pointless nubs (a near-bed edge on a big flat
 foot), mention that turning supports off for that one piece is an option.
 
-On large organic figures (ZKULL's head, body and hat; Jack), expect "supports":
-fins hold the straight runs but not the domes and the overhangs over the part. On
-mechanical parts and simple figures (ZKULL's legs), fins often hold everything.
+On large organic figures (ZKULL's head, body and hat), expect "fins+paint": fins
+hold the straight runs, the painted spots take the domes and the overhangs over the
+part. On mechanical parts and simple figures (ZKULL's legs), fins often hold
+everything.
 
-**Near misses**: a piece where fins hold everything except one small overhang
-(ZKULL's head: all but 45 mm² at 3 mm) is still `supports`, and the user will ask
-why. Say exactly what stops it, so the next step is theirs: paint support on just
-that spot in the slicer and the rest could go fins-only (fins plus painted support,
-not automatic supports), or accept the slicer's supports this time.
+A loose piece hanging less than the tight gap over the part (ZKULL's hat tag, 1.2
+mm) counts as a tight gap: a support squeezed under it would fuse it on. Mention it
+as something to look at in the preview. A loose piece hanging higher gets its
+bottom millimetre painted.
+
+Say in the report what is painted on each piece and where, so the user knows what
+the green in the slicer's support-painting view is, and can paint more or erase
+with the slicer's own tool before slicing.
 
 **Material.** The engine knows PLA and PETG. PETG fuses to supports far harder, so
 its fins stand off further: always pass `--material petg` for a PETG piece.
@@ -98,8 +111,8 @@ doesn't rotate objects; the user turns it in the slicer and re-runs.
 ## 3. Supports for the pieces that keep them
 
 **Build plate only.** The profiles default to supports from the build plate only.
-Turn that off (`support_on_build_plate_only: 0`) when a "supports" piece has bare
-overhangs **over the part**: from the plate only, nothing reaches them and they
+Turn that off (`support_on_build_plate_only: 0`) when a "supports" or "fins+paint"
+piece has bare overhangs **over the part**: from the plate only, nothing reaches them and they
 print into air (ZKULL: under the body's hood at 54 mm, inside the hat at 55 mm). Then warn:
 check the slice preview for supports inside closed cavities that can't be removed.
 If any appear, set that one piece back to build plate only.

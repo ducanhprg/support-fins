@@ -37,6 +37,9 @@ const only = flag('--only')?.split(',').map((s) => s.trim());
 const suggest = new Set(flag('--suggest')?.split(',').map((s) => s.trim()) ?? []);
 const projectLayer = Number(info.process.layer_height);
 const paintDir = flag('--paint');
+// One option, two spellings: Bambu Studio's tree_organic is Orca's organic (the
+// profiles write each machine's own token).
+const ORGANIC = /bambu/i.test(info.application ?? '') ? 'tree_organic' : 'organic';
 if (paintDir) mkdirSync(paintDir, { recursive: true });
 const MATERIALS = { PLA: 'pla', PETG: 'petg' };      // the engine's two; others fin as PLA, flagged
 // An overhang this close to the plate prints on the first layers' own squish (the
@@ -45,11 +48,22 @@ const MATERIALS = { PLA: 'pla', PETG: 'petg' };      // the engine's two; others
 // TOP: ZKULL's shoe soles curl up to 1.8 mm and print fine; the head's chin slopes
 // from 0.3 to 3.6 mm and is in the air at its top.
 const NEAR_BED = 2.0;   // mm
-// Fins hold this share of a piece's overhang area or more: fin it, and leave the
-// rest to supports the slicer grows only where they're painted (tree(manual)).
-// ZKULL on the U1: body 89%, hat 95%, head 97%. Below it, the slicer's supports
-// would do most of the work anyway, and two systems on one piece isn't worth it.
-const FINS_HOLD = 2 / 3;
+// Fins go wherever they hold an overhang, however small their share (the user's
+// rule: support is the last option); the rest is painted for the slicer
+// (tree(manual)), so the two never overlap.
+// A second support material (zero-gap interface) is worth asking about when a
+// piece keeps this much supported area, or one flat ceiling this big: below it
+// the gapped single-material underside isn't worth loading a spool for.
+const PAYS_TOTAL = 150, PAYS_CEILING = 100;   // mm²
+// Finish, for every piece. Flat tops of this much area are worth a note: ironing
+// pays on a level face that shows, but on a figure's parts most level tops are
+// sockets and mating faces (ZKULL: head, body, legs, shoes all 450-1000 mm²), so
+// it's the user's call, never written unasked (the profiles keep it off).
+const IRON_AREA = 300;   // mm² of level upward faces
+// A foot that tapers to a feather edge: this much sloped underside within 1 mm of
+// the plate, against the area actually touching it, lifts on a raft instead
+// (profiles section 5: "bottoms that taper to a feather edge can't adhere").
+const FEATHER = 2;       // sloped-near-bed area / contact area
 // Why the engine built no fin under a spot (web/prop.js regionSkips), in words.
 const WHY = {
   noLine: 'curved: no straight run for a wall', stub: 'too short for a wall',
@@ -76,7 +90,7 @@ function supportRecipe(spots, { manual, layer, process, iface }) {
       ov.support_style = 'tree_hybrid';
       why.push(`a ${Math.max(...ceilings.map((x) => x.area))} mm² flat ceiling among other spots: hybrid trees put an even block under it and branches elsewhere`);
     } else {
-      ov.support_style = 'tree_organic';
+      ov.support_style = ORGANIC;
       why.push(spots.some((x) => x.over === 'part')
         ? 'curved spots, some over the part: organic trees reach them round the model and touch little else'
         : 'curved or small spots: organic trees touch only them and peel off cleanly');
@@ -98,7 +112,7 @@ function supportRecipe(spots, { manual, layer, process, iface }) {
     ov.support_interface_bottom_layers = '2';
     why.push('trees land on the part: 2 bottom interface layers keep the landing marks off it');
   }
-  for (const k of Object.keys(ov)) if (k !== 'support_type' && process[k] === ov[k]) delete ov[k];
+  for (const k of Object.keys(ov)) if (process[k] === ov[k]) delete ov[k];
   return { overrides: ov, why };
 }
 // A piece is tippy when it's tall for the foot it stands on: height over the
@@ -121,6 +135,24 @@ const volume = (lists) => {
   }
   return Math.abs(v) / 6;
 };
+
+// Per-piece finish overrides: what the geometry says, nothing it doesn't. Walls for
+// load and the seam are the user's call (asked or left to the preset).
+function finishRecipe(row, { feathered, flatTop, fam, process, finned, pad }) {
+  const ov = {}, why = [], notes = [];
+  if (feathered && !finned) {
+    ov.raft_layers = '2';
+    why.push(`the foot tapers to a feather edge (${row.feather} mm² sloped within 1 mm of the plate, ${row.bed_area} mm² touching): a 2-layer raft, as the profiles do for feathered bottoms`);
+  } else if (row.brim) {
+    ov.brim_type = 'outer_only';
+    why.push(`tall for its foot (${row.size[2]} mm on ${row.bed_area} mm²): a brim of its own${pad ? '; the fins\' bed pad helps too' : ''}`);
+    if (feathered) why.push('the foot is feathered too, but the fins stand on it: brim, not a raft under the fins');
+  }
+  if (flatTop >= IRON_AREA && (fam === 'PLA' || fam === 'PETG') && (process.ironing_type ?? 'no ironing') === 'no ironing') {
+    notes.push(`${Math.round(flatTop)} mm² of level top surface: if it shows (not a socket or a glued face), ironing_type top on this piece`);
+  }
+  return { overrides: ov, why, notes };
+}
 
 // The faces of a loose piece within 1 mm of its lowest point: where the slicer has
 // to start holding it.
@@ -207,8 +239,19 @@ for (let i = 0; i < m.objects.length; i++) {
   const bareArea = bare.filter((x) => x.over === 'plate' || x.over === 'part').reduce((s, x) => s + x.area, 0);
   const held = res.overArea > 0 ? 1 - bareArea / res.overArea : 1;
   const verdict = !realBare && !loose.length ? (walls ? 'fins-only' : 'none-needed')
-    : walls && held >= FINS_HOLD ? 'fins+paint' : 'supports';
+    : walls ? 'fins+paint' : 'supports';
   const tippy = res.bedArea < SMALL_FOOT || res.size.z / Math.sqrt(Math.max(res.bedArea, 1e-6)) > TIPPY;
+  // finish: level tops (ironing) and a feathered foot (raft)
+  let flatTop = 0, feather = 0;
+  for (let f = 0; f < topo.nFaces; f++) {
+    const nz = topo.nrm[f * 3 + 2];
+    if (nz > 0.995) flatTop += topo.area[f];
+    else if (nz < -0.2 && nz > -0.985) {
+      const zc = (topo.pos[f * 9 + 2] + topo.pos[f * 9 + 5] + topo.pos[f * 9 + 8]) / 3 + off.z;
+      if (zc < 1) feather += topo.area[f];
+    }
+  }
+  const feathered = feather >= 20 && feather >= FEATHER * Math.max(res.bedArea, 1);
   const row = {
     cli_index: i + 1, name: meta.name ?? o.name, material: fam, fin_material: material, layer_height: layerHeight,
     unsupported_material: !MATERIALS[fam],
@@ -220,7 +263,7 @@ for (let i = 0; i < m.objects.length; i++) {
     bare_tight: tightBare, bare, bare_real: realBare, held: +held.toFixed(2),
     floating: b.floating.map((p) => ({ drop: +p.drop.toFixed(1), z: +p.lowest[2].toFixed(1),
                                        tight: !loose.includes(p) })),
-    brim: tippy, verdict,
+    brim: tippy, verdict, flat_top: +flatTop.toFixed(0), feather: +feather.toFixed(0),
   };
   if (suggest.has(row.name)) {
     const s = suggestOrientations(topo, { top: 3 });
@@ -233,6 +276,14 @@ for (let i = 0; i < m.objects.length; i++) {
     const iface = (info.interface_candidates ?? []).find((c) => c.loadable) ?? null;
     row.support = supportRecipe(spots.length ? spots : [{ area: 0, flat: 0, top: 99, over: 'plate' }],
                                 { manual: verdict === 'fins+paint', layer: layerHeight, process: info.process, iface });
+  }
+  row.finish = finishRecipe(row, { feathered, flatTop, fam, process: info.process, finned: walls > 0, pad: !!b.pad });
+  {
+    const spots = bare.filter((x) => x.over === 'plate' || x.over === 'part');
+    const total = spots.reduce((t, x) => t + x.area, 0);
+    const ceil = spots.filter((x) => x.flat >= CEILING).reduce((m, x) => Math.max(m, x.area), 0);
+    row.interface_pays = total >= PAYS_TOTAL || ceil >= PAYS_CEILING
+      ? `${total} mm² of supported underside${ceil >= PAYS_CEILING ? `, a ${ceil} mm² flat ceiling` : ''}` : null;
   }
   if (paintDir && verdict === 'fins+paint') {
     // The faces of every overhang the fins leave bare (not the tight or near-bed
@@ -259,6 +310,12 @@ for (let i = 0; i < m.objects.length; i++) {
     console.log(`     spot ${x.area}mm² ${x.z}-${x.top}mm over the ${x.over}, ${x.flat >= CEILING ? 'flat ceiling' : `slope ${Math.round(Math.acos(Math.min(1, x.flat)) * 180 / Math.PI)}° off flat`}, `
       + `${x.span} mm across: no fin (${x.no_fin.join('; ')})`);
   }
+  if (Object.keys(row.finish.overrides).length) {
+    console.log(`     finish: ${Object.entries(row.finish.overrides).map(([k, v]) => `${k}=${v}`).join(' ')}`);
+    for (const w of row.finish.why) console.log(`       - ${w}`);
+  }
+  for (const n of row.finish.notes) console.log(`     note: ${n}`);
+  if (row.interface_pays) console.log(`     second support material would pay: ${row.interface_pays}`);
   if (row.support) {
     console.log(`     support: ${Object.entries(row.support.overrides).map(([k, v]) => `${k}=${v}`).join(' ')}`);
     for (const w of row.support.why) console.log(`       - ${w}`);

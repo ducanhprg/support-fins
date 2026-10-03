@@ -43,29 +43,33 @@ anyway and report the analysis plus the plan you'll apply after they re-save it
 for the X2D or U1, with everything they must set in that one re-save (printer,
 process, filament, interface material). The playbook's section 1 has the details.
 
-## 2. Ask only what the file can't say
-
-One question, and only if it isn't obvious: a display piece, or does it carry load,
-and in which direction? A figure or ornament is display; say "this looks like a
-display piece" and confirm. Don't ask about quality, material or printer; the
-project already answered.
-
-## 3. Analyze every piece
+## 2. Analyze every piece
 
 ```
 node --max-old-space-size=12000 .claude/skills/print-tune/scripts/analyze_pieces.mjs "<project>.3mf" --inspect <work>/project.json --json <work>/pieces.json --paint <work>
 ```
 
-About 30-60 s per million triangles. One line per piece: height and bed contact
-(`TIPPY->brim` when it's tall for its foot), overhang regions, the fins the engine
-would build at this pose (walls, tines, grams), every overhang that still needs a
-support (area, height, over the plate or over the part), what's not counted (too
-tight for any support, or near the bed), loose pieces, and a verdict: `fins-only`,
-`fins+paint` (fins hold most of it; `--paint` writes the triangles of the spots
-they leave, `<work>/paint-<name>.json`), `supports` or `none-needed`. Under a piece
-that keeps any support: one `spot` line per spot (where, how flat, why no fin holds
-it) and a `support:` line with the kind, style and gap it should get and why. The fins are built exactly as the CLI builds them,
-with the piece's own material and layer height.
+About 30-60 s per million triangles. It walks each piece through the user's
+decision order and prints the answer to every step:
+
+1. **Does it need support?** Its overhang regions, minus what doesn't count: near
+   the bed (top under 2 mm), tight gaps over the part (a support would fuse them),
+   slivers. Nothing left: `none-needed`.
+2. **Can fins hold it?** The fins the engine builds at this pose (walls, tines,
+   grams), exactly as the CLI builds them with the piece's material and layer
+   height. All of it held: `fins-only`.
+3. **What fins can't hold**, one `spot` line each: area, height, over the plate or
+   over the part, how flat, how wide, and *why no fin* (curved, too short, the part
+   in the way...). Fins on the rest: `fins+paint` (`--paint` writes the spots'
+   triangles to `<work>/paint-<name>.json`). No fin anywhere: `supports`.
+4. **The support for those spots only**, a `support:` line: tree or normal, the
+   style (organic, hybrid, grid), manual (painted spots, beside fins) or auto, the
+   gap, each with its reason. `second support material would pay:` marks a piece
+   whose supported underside is big enough for a zero-gap interface to show.
+5. **Finish**, for every piece, needing support or not, a `finish:` line: a brim
+   for a piece tall for its foot, a raft for a feathered foot without fins; and
+   `note:` lines for what's the user's call (ironing a level top that may be a
+   mating face).
 
 To rank other poses for pieces standing on a point or an edge with little
 contact, add `--suggest "Name,Name"` (slow, ~20 s per piece). Put it on the first
@@ -73,24 +77,34 @@ run when the inspection already makes those pieces obvious; otherwise re-run wit
 `--only "Name,Name" --suggest "Name,Name"` so the other pieces aren't analyzed
 twice. Recommend a turn only when it's clearly better; see the playbook.
 
+## 3. Ask only what the file can't say
+
+At most two questions, in one message, and only when they change the plan:
+
+- **Display, or does it carry load (and which way)?** Only if it isn't obvious. A
+  figure or ornament is display; say "this looks like a display piece" and move on.
+  A load-bearing piece gets more walls on that piece (the profiles' advice).
+- **A second material for the support interface?** Only when the analysis says it
+  would pay and no free slot already holds one. The user usually says no: then the
+  single-material recipe stands, no follow-up.
+
+Don't ask about quality, material, printer, or anything the preset decides.
+
 ## 4. Decide, then write the plan
 
-Apply `references/playbook.md` to the inspection and the analysis. Typical outcome:
+Apply `references/playbook.md` to the inspection, the analysis and the answers:
 
-- `fins-only` pieces: fins merged, `enable_support: 0` for that piece;
-- `fins+paint` pieces: fins merged, the `support:` line's overrides (a manual
-  support type) for that piece, and its paint file as `paint_supports`: the slicer
-  supports only those spots;
-- `supports` pieces: the `support:` line's overrides;
-- `none-needed` pieces: left alone;
-- supports from everywhere if any `supports` piece has an overhang over the part;
-- the support interface in the other material when a free slot holds it
-  (zero gap); otherwise nothing written (the preset's gap stays) and the report
-  says what to load in which slot for next time;
-- a per-piece brim for every `TIPPY->brim` piece;
+- `fins-only`: fins merged, `enable_support: 0` for that piece;
+- `fins+paint`: fins merged, the `support:` overrides (manual), its paint file as
+  `paint_supports`: the slicer supports only those spots;
+- `supports`: the `support:` overrides (auto), no fins;
+- every piece: its `finish:` overrides; extra walls if it carries load;
+- `support_on_build_plate_only: 0` when a supported spot sits over the part;
+- the zero-gap interface recipe only with a second material (asked, or already in
+  a free slot); otherwise the preset's gap stays;
 - the rest of the preset kept.
 
-Make the fins for each fins-only piece (N is its `cli_index`, the material its
+Make the fins for each fins-only and fins+paint piece (N is its `cli_index`, the material its
 family in lower case, the layer height that piece prints at):
 
 ```

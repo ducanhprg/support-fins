@@ -71,8 +71,8 @@ option):
 - **fins-only**: every real overhang is held by a fin, there's no loose piece, and
   at least one wall was built. Plan: merge the fins into that piece and set its
   `enable_support` to `0`. This is the tool's whole point: no tree supports, no scars.
-- **fins+paint**: fins hold most of the overhang (2/3 of the area or more), and a
-  few spots stay bare: a dome, a hem low over the plate, an overhang over the part.
+- **fins+paint**: fins hold some of the overhang, however small a share (the
+  user's rule: fin whatever fins hold), and some spots stay bare: a dome, a hem low over the plate, an overhang over the part.
   Plan: merge the fins, set that piece's `support_type` to `tree(manual)`, and paint
   the bare spots as support enforcers (`analyze_pieces.mjs --paint` writes the
   triangles, the plan's `paint_supports` paints them). In manual mode the slicer
@@ -80,8 +80,8 @@ option):
   user wants on big figures: on ZKULL's U1 plate automatic tree supports filled the
   head, hood and hat, and they asked for fins instead (body 89%, hat 95%, head 97%
   held by fins; the rest painted).
-- **supports**: fins hold less than 2/3, or build nothing. Plan: leave the piece to
-  the slicer's automatic supports, and don't add fins to it. The slicer doesn't know
+- **supports**: fins build nothing on this piece. Plan: the slicer's automatic
+  supports with the `support:` line's kind and style. The slicer doesn't know
   fins exist; with automatic supports it would grow tree supports between the fin
   walls as well (`build_tuned.py` refuses fins on a piece with automatic supports).
 - **none-needed**: nothing to support.
@@ -171,14 +171,20 @@ support_interface_top_layers      3
 support_interface_pattern         rectilinear_interlaced
 ```
 
-Use it only when `inspect_project.py` lists a loadable interface candidate, a free
-slot holding the other material. On the U1 only slots 1-4 are toolheads. If there's
-none: build with the fallback below (usually that means writing nothing about the
-interface: the preset already has it), and tell the user exactly what to load in
-which free slot (one dropdown in the slicer: their own preset `PLA (X2D 0.4HS)` /
-`PETG (Snapmaker U1 0.4 Stainless Steel)`, etc.), then save and run this again for
-the zero-gap version. Never set a zero gap without it: same-material supports weld
-on. `build_tuned.py` refuses.
+Most of the time the user doesn't want a second material for supports. So:
+
+- a free slot already holds the other material (`inspect_project.py` lists it as a
+  loadable interface candidate; on the U1 only slots 1-4 are toolheads): use it;
+  they loaded it for a reason;
+- none, and the analysis says `second support material would pay`: ask once,
+  naming the gain (which piece, how much underside) and what loading it takes (one
+  dropdown in the slicer, their own preset `PLA (X2D 0.4HS)` / `PETG (Snapmaker U1
+  0.4 Stainless Steel)`, in a free slot, then save and run again). A no is the usual
+  answer: build single-material, don't bring it up again in the report;
+- none, and it wouldn't pay: single material, say nothing.
+
+Never set a zero gap without it: same-material supports weld on. `build_tuned.py`
+refuses.
 
 Temperatures for the pairing (Snapmaker's U1 guide; filament settings, so mention
 them, don't write them):
@@ -196,9 +202,9 @@ every interface layer costs a filament change and a purge.
 slicer rounds Z gaps **up to whole layers**: "0.24" at 0.16 mm layers is really
 0.32 and the underside droops. Don't write fractional-layer gaps.
 
-## 4. Brim: per piece, not global
+## 4. Finish: brim, raft, ironing, walls (every piece, supported or not)
 
-A piece that is tall for the foot it stands on gets a brim of its own: the
+The analysis's `finish:` line, per piece. **Brim**: a piece that is tall for the foot it stands on gets a brim of its own: the
 analysis marks it `TIPPY->brim` (under 50 mm² of contact, or a height more than 8x
 the foot's width, sqrt of the contact area). That catches ZKULL's head (8 mm²) and
 hat (9 mm²), its body (74 mm tall on 67 mm²) and Jack (150 mm on 56 mm²), and not the
@@ -207,6 +213,18 @@ profiles' convention, and leave the global brim alone: a brim on pieces that sit
 fine only adds cleanup and marks on the bottom edge. The profiles already carry
 width 8 and gap 0.2 as the global values the brim falls back to, so usually only
 `brim_type` goes in the plan; add width/gap only where the project's differ.
+
+**Raft** (`raft_layers 2`, per piece): a foot that tapers to a feather edge, much
+more sloped underside near the plate than area touching it (profiles section 5:
+feathered bottoms can't adhere; lift them on a raft). Not under fins: they and
+their bed pad already hold the foot, and a raft would lift them off the plate too.
+
+**Ironing** stays off (the profiles' default) unless the user says a level top
+shows. The analysis notes pieces with 300 mm² or more of level top, but on a
+figure's parts those are mostly sockets and glued faces (ZKULL: all of them), so
+it's a line in the report, not a setting.
+
+**Walls** for a piece that carries load: 4-5 on that piece (section 5).
 
 ## 5. Everything else: keep the preset unless this model says otherwise
 

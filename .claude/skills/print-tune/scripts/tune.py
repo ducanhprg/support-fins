@@ -42,6 +42,8 @@ def main():
     ap.add_argument('--coverage', help='force the fins\' wide-face coverage, 0-100 (default: decided per object)')
     ap.add_argument('--analyze-only', action='store_true', help='decide and report, build nothing')
     ap.add_argument('--rotate', action='append', default=[], help='"Name=X,Y": turn that piece first (world X, then Y)')
+    ap.add_argument('--fins', action='append', default=[], help='fin this piece whatever the numbers say (trees painted on the rest)')
+    ap.add_argument('--cutout', choices=['none', 'diamond', 'triangle', 'arch', 'lattice'], help='holes in the fin walls (saves plastic, not time)')
     a = ap.parse_args()
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
@@ -81,6 +83,8 @@ def main():
     cmd = NODE + [os.path.join(HERE, 'analyze_pieces.mjs'), src, '--inspect', pj, '--json', pieces_json, '--paint', work]
     if a.coverage is not None:
         cmd += ['--coverage', str(a.coverage)]
+    if a.fins:
+        cmd += ['--force-fins', ','.join(a.fins)]
     run(cmd, 'analyze_pieces')
     pieces = json.load(open(pieces_json, encoding='utf-8'))['pieces']
     names = [p['name'] for p in pieces]
@@ -150,7 +154,8 @@ def main():
         if 'fins' in spec:
             run(NODE + [os.path.join(REPO, 'plugins', 'cli', 'support-fins.js'), src, '--object', str(spec.pop('_cli')),
                         '--material', spec['fin_material'], '--layer-height', str(spec['fin_layer_height']),
-                        '--coverage', str(spec.pop('_cov')), '--fins-only', '-o', os.path.join(work, spec['fins'])],
+                        '--coverage', str(spec.pop('_cov')), '--fins-only', '-o', os.path.join(work, spec['fins'])]
+                + (['--cutout', a.cutout] if a.cutout else []),
                 f'fins for {name}')
     plan = os.path.join(work, 'plan.json')
     json.dump({'settings': settings, 'objects': objects}, open(plan, 'w', encoding='utf-8'), indent=1)

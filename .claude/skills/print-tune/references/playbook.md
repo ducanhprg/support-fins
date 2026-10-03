@@ -132,7 +132,10 @@ each carries its evidence:
    over 50 mm² is painted for trees beside the fins.
 3. **Otherwise organic trees** (style per section 3).
 Checked against real prints: Dr. Doom mask trees, ZKULL head trees, ZKULL legs
-fins, flat pieces none. The Baby Parasaurolophus' 13-16 mm socket roofs stay
+fins, flat pieces none. The mask finned anyway, upside down (the user's site run: 81%
+near a fin, 51 g = 20% of the mask, trees painted on the far 19%), sliced to 345 g and
+22.1 h against 342 g and 16.5 h upright with trees: no plastic saved, a third more
+time, fin marks on the crown. Just under both bars means trees, not a coin toss. The Baby Parasaurolophus' 13-16 mm socket roofs stay
 counted although its designer prints them unsupported (plates 1-2 printing,
 2026-10-04): if they come out clean, that's evidence for that shape only.
 

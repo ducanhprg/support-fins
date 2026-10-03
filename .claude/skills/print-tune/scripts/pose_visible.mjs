@@ -5,13 +5,13 @@ import { readFileSync } from 'node:fs';
 // of the shell, then on the inside. Outside = the face normal points away from the
 // bounding-box centre: right for masks, helmets and domes, rough for solid pieces.
 //
-//   node --max-old-space-size=12000 pose_visible.mjs PROJECT.3mf CLI_INDEX THRESHOLD [STEP=30]
+//   node --max-old-space-size=12000 pose_visible.mjs PROJECT.3mf CLI_INDEX THRESHOLD [STEP=30] [all]
 const REPO = new URL('../../../../', import.meta.url);
 const imp = (p) => import(new URL(p, REPO).href);
 const { buildTopology, analyze } = await imp('web/overhangs.js');
 const { readThreeMF } = await imp('web/threemf.js');
 const { seatSoup } = await imp('plugins/shared/engine/seat.js');
-const [file, idx, thr, stepArg] = process.argv.slice(2);
+const [file, idx, thr, stepArg, all] = process.argv.slice(2);
 const step = Number(stepArg ?? 30);
 const m = await readThreeMF(new Uint8Array(readFileSync(file)));
 const { pos } = seatSoup(m.objects[Number(idx) - 1].positions);
@@ -45,6 +45,7 @@ for (let ax = -180; ax < 180; ax += step) for (let ay = -90; ay <= 90; ay += ste
   rows.push({ ax, ay, h: Math.round(res.size.z), bed: Math.round(res.bedArea), vis: Math.round(vis), hid: Math.round(hid) });
 }
 rows.sort((p, q) => p.vis - q.vis || p.hid - q.hid);
+if (all === 'all') { for (const r of rows) console.log(JSON.stringify(r)); process.exit(0); }
 const now = rows.find((r) => r.ax === 0 && r.ay === 0);
 console.log('now (as placed):', JSON.stringify(now));
 for (const r of rows.slice(0, 8)) console.log(JSON.stringify(r));

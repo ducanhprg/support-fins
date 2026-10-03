@@ -41,7 +41,10 @@ const paintDir = flag('--paint');
 // A broad near-level ceiling needs its walls close: 100 for PETG and for any big flat
 // underside (ZKULL's head sagged between walls at the default 50).
 const COVERAGE = flag('--coverage');
-const VERBOSE = args.includes('--verbose');   // every support spot, one line each
+const VERBOSE = args.includes('--verbose');
+// Pieces the user wants finned whatever the numbers say: fins, plus trees painted on
+// what the fins leave more than NEAR_FIN away.
+const FORCE_FINS = new Set(flag('--force-fins')?.split(',').map((x) => x.trim()) ?? []);   // every support spot, one line each
 // One option, two spellings: Bambu Studio's tree_organic is Orca's organic (the
 // profiles write each machine's own token).
 const ORGANIC = /bambu/i.test(info.application ?? '') ? 'tree_organic' : 'organic';
@@ -125,6 +128,7 @@ function supportRecipe(spots, { manual, layer, process, iface }) {
 // Jack (150 mm on 56 mm²: 20x) and ZKULL's body (74 mm on 67 mm²: 9x) need a
 // brim; ZKULL's legs (40 mm on 503 mm²: 1.8x) don't.
 const TIPPY = 8, SMALL_FOOT = 50;   // ratio, mm²
+const POINT_FOOT = 20;              // mm²: under this a piece stands on a point
 
 const euler = (e) => {    // three.js Euler XYZ of a column-major matrix, degrees (the site's readout)
   const c = (v) => Math.max(-1, Math.min(1, v)), d = (r) => Math.round(r * 180 / Math.PI);
@@ -351,12 +355,15 @@ for (let i = 0; i < m.objects.length; i++) {
   const partG = solidGrams(topo, dens);
   const farFaces = need.filter((_, k) => !near[k]).map(([f]) => f);
   const farArea = farFaces.reduce((t, f) => t + topo.area[f], 0);
-  const finsWin = walls > 0 && finShare >= FINS_HOLD && finG <= Math.max(FIN_COST_MIN, FIN_COST * partG);
+  const forced = walls > 0 && FORCE_FINS.has(meta.name ?? o.name);
+  const finsWin = forced || (walls > 0 && finShare >= FINS_HOLD && finG <= Math.max(FIN_COST_MIN, FIN_COST * partG));
   const verdict = needArea < NEED_MIN && !loose.length ? 'none-needed'
     : finsWin ? (farArea < NEED_MIN && !loose.length ? 'fins-only' : 'fins+paint')
     : 'supports';
   const decideWhy = verdict === 'none-needed'
     ? `${Math.round(needArea)} mm² is flatter than the preset's ${thr}°: prints without support`
+    : forced ? `fins by request: within ${NEAR_FIN} mm of ${Math.round(finShare * 100)}% of the ${Math.round(needArea)} mm² that needs support, `
+      + `${finG.toFixed(1)} g${coverage === 1 ? ' at coverage 100' : ''}; trees painted on the ${Math.round(farArea)} mm² farther out`
     : finsWin ? `fins come within ${NEAR_FIN} mm of ${Math.round(finShare * 100)}% of the ${Math.round(needArea)} mm² that needs support, `
       + `for ${finG.toFixed(1)} g (the piece: ${partG.toFixed(0)} g solid)${coverage === 1 ? ', at coverage 100' : ''}`
     : needArea < NEED_MIN ? `a loose piece starts ${loose.map((p) => p.drop.toFixed(1)).join(', ')} mm in the air: supports hold it`
@@ -410,10 +417,17 @@ for (let i = 0; i < m.objects.length; i++) {
     row.support = supportRecipe(spots.length ? spots : [{ area: 0, flat: 0, top: 99, over: 'plate' }],
                                 { manual: verdict === 'fins+paint', layer: layerHeight, process: info.process, iface });
   }
-  if (verdict === 'none-needed' && info.process.enable_support === '1') {
+  // A piece standing on a point (Be Dr. Doom's ear discs turned for least overhang:
+  // 1 mm² under 80 mm) keeps the slicer's supports, and the report says to turn it
+  // onto a foot: nothing else holds it up.
+  const onPoint = res.bedArea < POINT_FOOT;
+  if (verdict === 'none-needed' && info.process.enable_support === '1' && !onPoint) {
     row.support = { overrides: { enable_support: '0' }, why: ['nothing past the threshold: the slicer would only add nubs'] };
   }
   row.finish = finishRecipe(row, { feathered, flatTop, fam, process: info.process, finned: walls > 0, pad: !!b.pad });
+  if (onPoint && verdict !== 'fins-only' && verdict !== 'fins+paint') {
+    row.finish.notes.unshift(`stands on ${row.bed_area} mm² only, ${row.size[2]} mm tall: turn it onto a foot (pose_visible.mjs lists poses with one)`);
+  }
   {
     const spots = verdict === 'none-needed' || verdict === 'fins-only' ? [] : supportSpots;
     const total = spots.reduce((t, x) => t + x.area, 0);

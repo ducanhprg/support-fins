@@ -20,7 +20,14 @@ for (const pair of pairs) {
   // the reader drops a file extension from object names ("HAT.stl" -> "HAT")
   const obj = m.objects.find((o) => o.name === name || o.name === name.replace(/\.(stl|3mf|obj|step|stp)$/i, ''));
   if (!obj) { console.log(`${name}: NOT FOUND in ${file}`); bad++; continue; }
-  const fins = readSTL(new Uint8Array(readFileSync(stl)));
+  // The builder drops zero-area triangles (two corners equal to 1e-6 mm; the cutouts
+  // leave a few), so drop them here too or every triangle after one reads as shifted.
+  const raw = readSTL(new Uint8Array(readFileSync(stl)));
+  const keep = [];
+  const same = (i, j) => [0, 1, 2].every((k) => Math.round(raw[i + k] * 1e6) === Math.round(raw[j + k] * 1e6));
+  for (let t = 0; t < raw.length; t += 9) if (!same(t, t + 3) && !same(t + 3, t + 6) && !same(t, t + 6)) keep.push(t);
+  const fins = new Float32Array(keep.length * 9);
+  keep.forEach((t, k) => fins.set(raw.subarray(t, t + 9), k * 9));
   // The builder appends the fins to the object's first mesh, so on a multi-part object
   // they sit after that part's triangles, not at the end: find the contiguous block.
   const P = obj.positions;

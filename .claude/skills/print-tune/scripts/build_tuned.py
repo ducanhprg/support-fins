@@ -312,7 +312,8 @@ def main():
         ax, ay = spec['rotate']
         pts = world_vertices(zin, comps, oid, items[oid], cache)
         new = turned_item(items[oid], ax, ay, pts)
-        ext = [max(apply(new, p)[k] for p in pts) - min(apply(new, p)[k] for p in pts) for k in range(3)]
+        moved = world_vertices(zin, comps, oid, new, cache)
+        ext = [max(p[k] for p in moved) - min(p[k] for p in moved) for k in range(3)]
         items[oid] = new
         fmt = ' '.join(f'{v:.9g}' for v in new)
         root, n = re.subn(r'(<item objectid="' + oid + r'"[^>]*?transform=")[^"]+(")', lambda mm: mm.group(1) + fmt + mm.group(2), root)

@@ -38,6 +38,13 @@ Studio file goes to the X2D, a Snapmaker Orca file to the U1. If the model only
 fits or only makes sense on the other one (size, colours), say so and give both.
 `build_tuned.py` refuses other printers anyway.
 
+**A tuned file the user re-saved** (they keep working from it: new plates,
+colours) is the brief, but its meshes may still carry fins from the last tune at
+their tail, and the analysis would read those as part of the model. Compare each
+object's triangle count with the earlier project or tune; when a mesh has extra
+triangles at the end that match the old fins STL, strip them into a clean working
+copy and tune that (output beside the user's file, e.g. `- tuned v2`).
+
 **A designer's per-object overrides** (a MakerWorld file often carries speeds,
 infill and support style tuned for *their* machine) come along through the re-save.
 Keep the ones that are about the model (walls and infill for a figurine are the

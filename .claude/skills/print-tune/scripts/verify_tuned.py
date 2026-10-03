@@ -40,6 +40,8 @@ def main():
     check([i.filename for i in A.infolist()] == [i.filename for i in B.infolist()], 'same entries, same order')
     changed = [n for n in A.namelist() if A.read(n) != B.read(n)]
     allowed = {'Metadata/project_settings.config', 'Metadata/model_settings.config'}
+    if any(s.get('rotate') for s in OBJ.values()):
+        allowed.add('3D/3dmodel.model')
     meshes = [n for n in changed if n not in allowed]
     check(all(n.startswith('3D/Objects/') for n in meshes)
           and len(meshes) <= sum(1 for s in OBJ.values() if s.get('fins') or s.get('paint_supports')),
@@ -63,10 +65,25 @@ def main():
     plates = lambda m: [re.findall(r'key="object_id" value="(\d+)"', p) for p in re.findall(r'<plate>(.*?)</plate>', m, re.S)]
     check(plates(ma) == plates(mb), f'plates unchanged: {plates(mb)}')
     for name, spec in OBJ.items():
-        m = re.search(r'<metadata key="name" value="' + re.escape(name) + r'"/>(.*?)<part', mb, re.S)
+        # the object's own name, not a part of another object that happens to share it
+        m = re.search(r'<object id="\d+">\s*<metadata key="name" value="' + re.escape(name) + r'"/>(.*?)<part', mb, re.S)
         got = dict(re.findall(r'<metadata key="([^"]+)" value="([^"]*)"', m.group(1))) if m else {}
         ov = {k: (None if v is None else str(v)) for k, v in spec.get('overrides', {}).items()}
         check(all(got.get(k) == v for k, v in ov.items()), f'{name}: overrides {ov}')   # None: removed
+
+    # turned pieces: rotation exactly as planned, back on the plate
+    ra, rb = A.read('3D/3dmodel.model').decode('utf-8'), B.read('3D/3dmodel.model').decode('utf-8')
+    item = lambda root, oid: bt.mat(re.search(r'<item objectid="' + oid + r'"[^>]*?transform="([^"]+)"', root).group(1))
+    for name, spec in OBJ.items():
+        if not spec.get('rotate'):
+            continue
+        oid = re.search(r'<object id="(\d+)">\s*<metadata key="name" value="' + re.escape(name) + r'"/>', ma).group(1)
+        old, new, A_ = item(ra, oid), item(rb, oid), bt.rotation(*spec['rotate'])
+        want = bt.compose(old, A_ + [0, 0, 0])[:9]
+        pts = bt.world_vertices(B, bt.components(rb), oid, new, {})
+        z0 = min(p[2] for p in pts)
+        check(max(abs(w - g) for w, g in zip(want, new[:9])) < 1e-6 and abs(z0) < 1e-3,
+              f'{name}: turned X{spec["rotate"][0]:+g} Y{spec["rotate"][1]:+g}, lowest point at z {z0:.4f}')
 
     comps = bt.components(A.read('3D/3dmodel.model').decode('utf-8'))
     ca, cb = {}, {}

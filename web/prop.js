@@ -169,6 +169,14 @@ function buildPass(topo, result, rot, opts, raster) {
   let nextId = 0;
   const skipped = { noLine: 0, wanders: 0, stub: 0, blocked: 0,
                     degenerate: 0, buried: 0, weld: 0, sliver: 0 };
+  // The same reasons per region, so a caller can say why THAT overhang got no
+  // fin (a curved roof, a stub, the part in the way) instead of a total.
+  const regionSkips = {};
+  const skip = (reason, patch) => {
+    skipped[reason]++;
+    const r = (regionSkips[patch.region] ??= {});
+    r[reason] = (r[reason] ?? 0) + 1;
+  };
   const v = [0, 0, 0];
 
   // The whole part, seated once, for the part-attached floor probe: the floor a
@@ -260,6 +268,8 @@ function buildPass(topo, result, rot, opts, raster) {
       // the sparse-coverage sag warning, per region: it only counts if this region swaps
       if (wantSparse && lines.spacing > PROP.maxUnsupportedSpan) tally.sagRegions.add(ri);
       if (lines.length) patches.push({ faces: rFaces, area: regionArea, region: ri, tris: regionTris, lines });
+      // no track at all: said per region only, the totals stay what they were
+      else (regionSkips[ri] ??= {}).noTrack = 1;
       continue;
     }
 
@@ -324,7 +334,7 @@ function buildPass(topo, result, rot, opts, raster) {
       // Matthew's call). Single-row faces (spacing 0) can't sag, so they don't warn.
       if (wantSparse && lines.length && lines.spacing > PROP.maxUnsupportedSpan) tally.sagRisk = true;
     }
-    if (!lines.length) { skipped.noLine++; continue; }
+    if (!lines.length) { skip('noLine', patch); continue; }
 
     // An index loop, not for...of over a copy: a raster track's leftover pieces
     // are appended to `lines` mid-loop (rasterRest).
@@ -348,7 +358,7 @@ function buildPass(topo, result, rot, opts, raster) {
         const hit = solidClearance(topo, rot, off, out.slice(tri0), 0.25);
         if (hit && welds(hit)) {
           out.length = tri0;
-          skipped.weld++;
+          skip('weld', patch);
           continue;
         }
       }
@@ -416,7 +426,7 @@ function buildPass(topo, result, rot, opts, raster) {
       // rather than the bowl-refusal it was for bucketed polylines -- bowls are
       // now refused by their holes (see patchTracks). Keep it: anything that
       // trips it means the frame fit itself went wrong.
-      if (straightness(line) > PROP.maxWander) { skipped.wanders++; runSquat(); continue; }
+      if (straightness(line) > PROP.maxWander) { skip('wanders', patch); runSquat(); continue; }
 
       // Trim to the longest run that can actually carry a wall, rather than
       // discarding the track over a local problem. See `longestRun`.
@@ -425,7 +435,7 @@ function buildPass(topo, result, rot, opts, raster) {
       const usable = withLowTails(
         line.map((p, k) => clear[k] && p[2] - PROP.gap >= PROP.minHeight), clear);
       const run = longestRun(usable);
-      if (!run || run[1] - run[0] < PROP.minStations) { skipped.blocked++; runSquat(); continue; }
+      if (!run || run[1] - run[0] < PROP.minStations) { skip('blocked', patch); runSquat(); continue; }
       if (raster && !patch.strut) {       // a strut takes one wall, as it would standing alone
         for (const rest of rasterRest(line, run)) {
           lines.push(rest);
@@ -436,7 +446,7 @@ function buildPass(topo, result, rot, opts, raster) {
       const sub = line.slice(run[0], run[1]);
 
       const body = bodyMask(sub);               // before settleTop -- see bodyMask
-      if (tallSpan(sub, body) < minSpanFor(sub, body, !!patch.smallTube, short)) { skipped.stub++; runSquat(); continue; }
+      if (tallSpan(sub, body) < minSpanFor(sub, body, !!patch.smallTube, short)) { skip('stub', patch); runSquat(); continue; }
 
       // Last, on the trimmed run only: put the closest approach exactly on spec.
       // It runs here rather than earlier because trimming changes which part of
@@ -542,7 +552,7 @@ function buildPass(topo, result, rot, opts, raster) {
         for (let k = run[0] + run2[0]; k < run[0] + run2[1]; k++) claimed[k] = true;
         placed = true;
       }
-      if (!placed && reason) skipped[reason]++;
+      if (!placed && reason) skip(reason, patch);
       runSquat();
     }
     if (patch.smallTube) rivalry.tubeDone(patch, mark, patches);
@@ -552,7 +562,7 @@ function buildPass(topo, result, rot, opts, raster) {
   // `served` counts REGIONS with at least one wall, because a region can now
   // yield several -- subtracting a prop count from a region count would say a
   // part with one region and three walls had "-2 unserved".
-  return { triangles: out, props, skipped, served: servedRegions.size,
+  return { triangles: out, props, skipped, regionSkips, served: servedRegions.size,
            servedRegions: [...servedRegions],
            tines: tally.tines, sagRisk: tally.sagRisk,
            ...(raster ? { sagRegions: tally.sagRegions } : {}),

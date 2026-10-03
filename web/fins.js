@@ -329,6 +329,7 @@ function buildFinsCore(topo, result, rot, opts = {}) {
     // `blocked: 0` at 0 degrees when the real reason was `buried: 1`.
     // Whatever explains a failure has to survive the trip to the UI.
     skipped: built.skipped,
+    regionSkips: built.regionSkips ?? {},
     rejected: { blocked: built.skipped.blocked, tooFewTines: 0,
                 sites: result.regions.length,
                 tried: result.regions.length },

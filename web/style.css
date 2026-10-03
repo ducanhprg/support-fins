@@ -485,6 +485,10 @@ html, body {
 }
 #fin-opts input[type=number] { width: 72px; }
 #fin-opts input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
+/* A slider with a number box beside it, for typing an exact value. */
+#fin-opts .slider-num { display: flex; align-items: center; gap: 8px; }
+#fin-opts .slider-num input[type=range] { flex: 1; min-width: 0; }
+#fin-opts .slider-num input[type=number] { width: 60px; flex: none; }
 /* A one-control field: label left, control right, one line instead of two. */
 #fin-opts .fld.row {
   flex-direction: row;

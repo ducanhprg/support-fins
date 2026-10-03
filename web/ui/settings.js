@@ -117,6 +117,31 @@ el('tine-density').addEventListener('input', () => debouncedRefresh());
 el('layer-height').addEventListener('input', () => debouncedRefresh());
 el('coverage').addEventListener('input', () => debouncedRefresh());
 
+// Tine grip and Wide-face coverage each have a number box beside the slider, for an
+// exact value. The slider stays the source of truth: a typed value in range drives it
+// (and through its `input` event, the rebuild); leaving the box clamps what was typed.
+function pairSlider(id) {
+  const range = el(id), num = el(`${id}-num`);
+  const clamp = (v) => Math.min(+range.max, Math.max(+range.min, Math.round(v)));
+  range.addEventListener('input', () => { num.value = range.value; });
+  num.addEventListener('input', () => {
+    const v = num.valueAsNumber;
+    if (!Number.isFinite(v) || v < +range.min || v > +range.max) return;   // mid-typing
+    range.value = clamp(v);
+    range.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  num.addEventListener('change', () => {
+    const v = num.valueAsNumber;
+    num.value = Number.isFinite(v) ? clamp(v) : range.value;
+    if (+num.value !== range.valueAsNumber) {
+      range.value = num.value;
+      range.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  });
+}
+pairSlider('tine-density');
+pairSlider('coverage');
+
 // Sway braces: the switch sits in its section header (like Tines), and its three
 // settings only show while it is on, so an unused feature costs one line. The two
 // tine settings additionally follow the global Tines toggle -- with tines off there

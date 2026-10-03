@@ -245,7 +245,10 @@
     <label class="fld" id="tinegrip-fld"
            title="How tightly to space the grip tines. Light = fewest marks (default), a per-wall floor keeps grip; Firm = dense comb / max grip for a tippy or tall part.">
       <span>Tine grip <span class="mut">light ⟶ firm</span></span>
-      <input type="range" id="tine-density" min="0" max="100" step="5" value="0">
+      <span class="slider-num">
+        <input type="range" id="tine-density" min="0" max="100" step="1" value="0">
+        <input type="number" id="tine-density-num" min="0" max="100" step="1" value="0" aria-label="Tine grip, 0 light to 100 firm">
+      </span>
     </label>
     <!-- Layer height: the grip tines are exactly ONE layer tall so they print as one
          clean bead and BEND off instead of tearing. That only holds if this matches
@@ -351,7 +354,10 @@
     <label class="fld" id="coverage-fld"
            title="How densely to line a WIDE overhang face with fins. The middle is the anti-sag default; drag LEFT for fewer fins (a small part can go down to one — the readout warns if a broad face then risks sagging), RIGHT for more support. Narrow parts are unaffected.">
       <span>Wide-face coverage <span class="mut">sparse ⟶ dense</span></span>
-      <input type="range" id="coverage" min="0" max="100" step="5" value="50">
+      <span class="slider-num">
+        <input type="range" id="coverage" min="0" max="100" step="1" value="50">
+        <input type="number" id="coverage-num" min="0" max="100" step="1" value="50" aria-label="Wide-face coverage, 0 sparse to 100 dense">
+      </span>
     </label>
     <!-- Suggest + Draw mix: place extra walls by hand where auto-placement missed.
          Shown only in Suggest mode (toggled in ui/settings.js). Per-fin removal (Auto only,

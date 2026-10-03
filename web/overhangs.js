@@ -13,10 +13,29 @@
  *                    re-classifies. Linear and allocation-free, so it can run on
  *                    every frame of a gizmo drag.
  */
+import { insidePart } from './inside.js';
 
 export const BED_EPS = 0.35;          // mm; a face this close to the plate IS the bottom
 export const MIN_REGION_AREA = 12.0;  // mm^2; ignore slivers
 export const DEFAULT_THRESHOLD = 45;  // degrees from the plate
+
+/**
+ * Solid this close under a down-facing face means the face is CONTACT, not an
+ * overhang: one piece of a multi-body file sitting on another (a clicker's boots
+ * on its base, 0.0-0.1 mm apart), or a slot thinner than a layer. The slicer
+ * prints both surfaces as one, so nothing is bridged and nothing needs a fin --
+ * but by its normal alone the face reads as a flat ceiling, and it was painted
+ * red and counted as an unsupported overhang. Same distance pieces.js uses for a
+ * piece that rests on another. JS only: prototype/spike_overhangs.py has no
+ * contact pass.
+ */
+export const RESTS_ON = 0.3;          // mm
+// Probed ONE depth down, a layer under the face: flush contact and a hair gap
+// both put solid there, open air and a real gap don't. One depth, not two, and
+// few probes, because this runs on every frame of a gizmo drag.
+const REST_PROBE_DEPTH = 0.2;         // mm
+const REST_PROBES = 8;                // faces probed per region (1 for a sliver)
+const REST_SHARE = 0.75;              // share of the probed area that must rest
 
 /**
  * A face sitting EXACTLY on the threshold is self-supporting and must not be
@@ -178,7 +197,19 @@ export function analyze(topo, thresholdDeg = DEFAULT_THRESHOLD, rot = IDENTITY3)
     else byRoot.set(r, { faces: [f], area: area[f] });
   }
 
-  const raw = [...byRoot.values()];
+  // where the rotated part sits, so the caller can drop it onto the plate
+  const offset = { x: -(minX + maxX) / 2, y: -(minY + maxY) / 2, z: -minZ };
+
+  // Contact faces (see RESTS_ON) stop being overhangs: off the red and the amber,
+  // out of the area and the region count, and counted on their own so the
+  // readout can say they were set aside rather than lose them silently.
+  const raw = [];
+  let restingCount = 0, restingArea = 0;
+  for (const g of byRoot.values()) {
+    if (!restsOnPart(topo, g, rot, offset)) { raw.push(g); continue; }
+    restingCount++; restingArea += g.area;
+    for (const f of g.faces) { over[f] = 0; overArea -= area[f]; overFaceCount--; }
+  }
   const regions = raw
     .filter((g) => g.area >= MIN_REGION_AREA)
     .sort((a, b) => b.area - a.area);
@@ -189,10 +220,38 @@ export function analyze(topo, thresholdDeg = DEFAULT_THRESHOLD, rot = IDENTITY3)
 
   return {
     over, kept, onBed, regions,
+    // the overhangs too small to fin (painted amber), for the UI to sort further
+    slivers: raw.filter((g) => g.area < MIN_REGION_AREA),
     rawRegionCount: raw.length,
+    restingCount, restingArea,
     overArea, bedArea, overFaceCount,
-    // where the rotated part sits, so the caller can drop it onto the plate
-    offset: { x: -(minX + maxX) / 2, y: -(minY + maxY) / 2, z: -minZ },
+    offset,
     size: { x: maxX - minX, y: maxY - minY, z: maxZ - minZ },
   };
+}
+
+/**
+ * Does region `g` sit on the part itself (solid a layer under most of its
+ * area)? Probes a spread of its faces at REST_PROBE_DEPTH. A region over open
+ * air or over a real gap finds nothing there.
+ */
+function restsOnPart(topo, g, rot, offset) {
+  const { pos, area } = topo;
+  const want = g.area >= MIN_REGION_AREA ? REST_PROBES : 1;
+  const step = Math.max(1, Math.floor(g.faces.length / want));
+  let probed = 0, resting = 0;
+  for (let i = 0; i < g.faces.length; i += step) {
+    const f = g.faces[i], o = f * 9;
+    let x = 0, y = 0, z = 0;
+    for (let k = 0; k < 9; k += 3) {
+      const px = pos[o + k], py = pos[o + k + 1], pz = pos[o + k + 2];
+      x += rot[0] * px + rot[3] * py + rot[6] * pz;
+      y += rot[1] * px + rot[4] * py + rot[7] * pz;
+      z += rot[2] * px + rot[5] * py + rot[8] * pz;
+    }
+    x = x / 3 + offset.x; y = y / 3 + offset.y; z = z / 3 + offset.z;
+    probed += area[f];
+    if (insidePart(topo, rot, offset, x, y, z - REST_PROBE_DEPTH)) resting += area[f];
+  }
+  return probed > 0 && resting >= REST_SHARE * probed;
 }

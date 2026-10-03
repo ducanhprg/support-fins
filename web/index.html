@@ -103,11 +103,22 @@
     <dt>Area</dt>                                <dd id="s-overarea">—</dd>
     <dt><i class="sw sw-bed"></i>Bed&nbsp;contact</dt> <dd id="s-bed">—</dd>
     <dt><i class="sw sw-fin"></i>Fins</dt>       <dd><span id="s-fins">—</span><button
-        type="button" class="note-info" id="s-fin-info" hidden
-        aria-label="How these supports work, and what this pose leaves uncovered">i</button></dd>
+        type="button" class="note-info" id="s-fin-info" hidden aria-expanded="false"
+        aria-controls="s-fin-why"
+        aria-label="Why: how these supports work, and what this pose leaves uncovered">i</button></dd>
     <dt><i class="sw sw-pad"></i>Bed&nbsp;pad</dt> <dd id="s-pad">—</dd>
     <dt>Analysis</dt>                            <dd id="s-time">—</dd>
   </dl>
+  <!-- Overhang status (ui/status.js): one button per kind -- need support, held
+       by a fin, too small, too tight -- that flies the camera to the next one and
+       flashes it through the part. The caption says which one is showing. -->
+  <div id="s-status" class="status-list" role="group" aria-label="Overhangs by status" hidden></div>
+  <p id="s-status-cap" class="status-cap" aria-live="polite"></p>
+  <!-- What the (i) opens: why this pose got the fins it did, and what it left
+       bare. It used to be the button's title tooltip only -- a slow hover, nothing
+       on click, nothing on touch -- for the one sentence that says why a part got
+       no fins. Filled by ui/readout.js (setFinNote), one <p> per reason. -->
+  <div id="s-fin-why" class="why" hidden></div>
 </aside>
 
 <aside id="orient" hidden>
@@ -440,12 +451,14 @@
   <div class="picker-panel" role="dialog" aria-modal="true" aria-labelledby="picker-title">
     <h2 id="picker-title">This file has several objects</h2>
     <p class="picker-sub">Pick the one to add fins to. Check more than one to merge
-      them into a single part.</p>
+      them into a single part. Or fin every object as it sits on the plate and save
+      them together in one 3MF.</p>
     <ul id="picker-list"></ul>
     <div class="picker-foot">
       <span id="picker-hint" class="note"></span>
       <span class="picker-actions">
         <button class="btn" id="picker-cancel">Cancel</button>
+        <button class="btn" id="picker-all">Fin all &amp; export 3MF</button>
         <button class="btn primary" id="picker-load">Load</button>
       </span>
     </div>

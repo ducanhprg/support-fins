@@ -64,6 +64,20 @@ Deno.test('floating: a loose piece inside a void is still found', () => {
   assert(f.length === 1 && Math.abs(f[0].drop - 3) < 1e-6, `loose piece: ${JSON.stringify(f)}`);
 });
 
+Deno.test('floating: a piece sunk into another is joined, even with air under it', () => {
+  // A multi-colour inlay (Ghost Clicker's eyes and blush, Oct 2026): a 4 mm cube
+  // pressed halfway into the side of a body, 12 mm up. Its lowest point hangs
+  // over air, but the slicer merges overlapping bodies, so it prints joined.
+  const body = block(-10, 10, -10, 10, 0, 20);
+  const topo = topoOf([...body, ...block(8, 12, -2, 2, 12, 16)]);
+  const f = floatingPieces(topo, analyze(topo, 45, I), I);
+  assert(f.length === 0, `inlay flagged as floating: ${JSON.stringify(f)}`);
+
+  // the same cube moved 1 mm off the side is loose again
+  const off = topoOf([...body, ...block(11, 15, -2, 2, 12, 16)]);
+  assert(floatingPieces(off, analyze(off, 45, I), I).length === 1, 'a cube beside the body floats');
+});
+
 Deno.test('floating: 1,800 stacked pieces check in well under a second', () => {
   // a 60 x 30 grid of posts, each carrying a cap 0.1 mm above it: 3,600 pieces,
   // 1,800 of them lifted, none floating. Testing every lifted piece against every

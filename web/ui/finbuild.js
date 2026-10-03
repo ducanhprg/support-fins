@@ -17,7 +17,8 @@ import {
   drawnTris, drawnMesh, drawMaterial, drawShown, clearPreview, rebuildDrawn,
 } from './walls.js';
 import { finsVisible, finMode } from './settings.js';
-import { topology, rotM3, lastResult, updateFit } from './part.js';
+import { topology, rotM3, lastResult, updateFit, paintOverhangs } from './part.js';
+import { setBuilt } from './status.js';
 
 export let finMesh = null;
 let padMesh = null;
@@ -72,6 +73,7 @@ let finT0 = 0;               // start time of the in-flight build, for the reado
 let lastOpts = null;
 let finSpinnerTimer = null;  // shows the spinner only if a build runs past ~1s
 let finBusy = false;         // a worker build is outstanding (used to supersede it)
+let sentResult = null;       // the analysis the outstanding build is for (ui/status.js)
 
 // Reveal the spinner only for builds that actually run long, so a sub-second
 // rebuild never flashes it. Cleared the moment the build lands (applyBuilt).
@@ -89,7 +91,7 @@ function clearSpinner() {
   el('spinner').classList.remove('show');
 }
 
-function finOpts() {
+export function finOpts() {
   return { mode: finMode === 'draw' ? 'prop' : finMode,
            bedPad: el('bed-pad').value !== 'off',
            tines: el('tines').checked,
@@ -172,11 +174,14 @@ export function refreshFins() {
     clearPreview();
     rebuildDrawn();
     updateReadout(null);
+    setBuilt(null);                    // nothing holds the overhangs now: back to red
+    paintOverhangs();
     return;
   }
 
   finT0 = performance.now();
   lastOpts = finOpts();
+  sentResult = lastResult;
   supersedeBuild();                    // discard any older in-flight pose before starting this one
   const worker = getFinWorker();
   if (!worker) {                       // no worker available: build inline (old behaviour)
@@ -234,6 +239,9 @@ function applyBuilt(built) {
   finMaterial.opacity = padMaterial.opacity = 1;
 
   lastBuilt = built;
+  // Which overhangs this build holds, for the pose it was built for; Draw places
+  // walls by hand, so the auto build's coverage says nothing there.
+  setBuilt(finMode === 'draw' ? null : sentResult, built);
   padTris = built.padTriangles;
   padMesh = meshFrom(padTris, padMaterial);
 
@@ -257,6 +265,7 @@ function applyBuilt(built) {
   // Restore-all visibility keys off removedIds (this orientation's removals), which
   // is only known after the reconcile above -- refresh it once the build lands.
   syncRemoveUI();
+  paintOverhangs();                    // held overhangs stop being red
 }
 
 /**

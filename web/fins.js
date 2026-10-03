@@ -26,6 +26,7 @@
  *   pad.js        PAD and the bed pad (conforming oval, or the brim-style one)
  *   wedges.js     angled wedges where no wall reaches; gripPatches for Draw
  *   shortwalls.js the last resort: short, stocky walls where nothing else reached
+ *   tight.js      which bare overhangs sit too close above the part for any fin
  *
  * Each module imports only modules above it in this list and never fins.js.
  */
@@ -38,7 +39,8 @@ import { FIN } from './fins/config.js';
 import { buildPad, PAD } from './fins/pad.js';
 import { bedContact, seatedPartTris, seatingOf } from './fins/seating.js';
 import { lastResortWalls } from './fins/shortwalls.js';
-import { buildPerpFins, PERP, propServesPatch, unservedAfterWedges, wedgeVeto } from './fins/wedges.js';
+import { bareAfterWedges, buildPerpFins, PERP, propServesPatch, wedgeVeto } from './fins/wedges.js';
+import { tightGap, tightRegions } from './fins/tight.js';
 
 // Moved into web/fins/ (one module per concern); re-exported here so every
 // importer of fins.js is unchanged.
@@ -116,8 +118,18 @@ export function buildFins(topo, result, rot, opts = {}) {
   // A piece of the part that starts in mid-air (a cut clean through, a loose
   // body) needs saying no matter what was placed: see floatingPieces.
   built.floating = floatingPieces(topo, result, rot);
+  // Of the regions left bare, the ones too close above the part for any fin,
+  // so the readout can say that instead of "tilt it" (fins/tight.js).
+  built.unservedTight = tightRegions(topo, result, rot, built.unservedRegions ?? []).length;
+  built.tightGap = tightGap();
   return built;
 }
+
+/** Indices of result.regions not in `served`. */
+const bareOf = (result, served) => {
+  const s = new Set(served);
+  return result.regions.map((_, i) => i).filter((i) => !s.has(i));
+};
 
 function buildFinsAndBraces(topo, result, rot, opts = {}) {
   applyTunables(opts.tunables);
@@ -266,6 +278,11 @@ function buildFinsCore(topo, result, rot, opts = {}) {
       });
     }
     const servedRegions = [...(base.servedRegions ?? []), ...short.served];
+    // The bare regions as a LIST (the tight-gap note needs to know which), and
+    // the count from it: a wedge can reach a region no wall did.
+    const unservedRegions = wedgedPatches
+      ? bareAfterWedges(topo, rot, result, servedRegions, wedgeTris)
+      : bareOf(result, servedRegions);
     return {
       ...base, mode,
       triangles: [...base.triangles, ...wedgeTris, ...short.triangles],
@@ -277,8 +294,8 @@ function buildFinsCore(topo, result, rot, opts = {}) {
       // plain prop. Report the split so the stress harness / UI metrics keep working.
       braceCount: withTines ? fins.length : wedgeCount,
       propCount: withTines ? 0 : base.fins.length + short.props.length,
-      unserved: wedgedPatches ? unservedAfterWedges(topo, rot, result, servedRegions, wedgeTris)
-                              : (base.unserved ?? 0) - short.served.length,
+      unserved: unservedRegions.length,
+      unservedRegions,
     };
   }
 
@@ -323,6 +340,7 @@ function buildFinsCore(topo, result, rot, opts = {}) {
     // `blocked: 0` at 0 degrees when the real reason was `buried: 1`.
     // Whatever explains a failure has to survive the trip to the UI.
     skipped: built.skipped,
+    regionSkips: built.regionSkips ?? {},
     rejected: { blocked: built.skipped.blocked, tooFewTines: 0,
                 sites: result.regions.length,
                 tried: result.regions.length },
@@ -332,6 +350,7 @@ function buildFinsCore(topo, result, rot, opts = {}) {
     // yield several walls now that it is split into sub-patches, and the old
     // subtraction would go negative.
     unserved: result.regions.length - built.served,
+    unservedRegions: bareOf(result, built.servedRegions ?? []),
     sagRisk: built.sagRisk ?? false,
     seating,
     tip: null,

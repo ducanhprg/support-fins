@@ -194,6 +194,10 @@ export function computeFins(positions, options = {}) {
       swaySkipped: built.sway?.skipped ?? 0,
       swayReason: built.sway?.reason ?? null,
       unserved: built.unserved ?? null,
+      // of those, how many sit too close above the part for any fin (under
+      // tightGap mm): the report names them apart from the rest
+      unservedTight: built.unservedTight ?? 0,
+      tightGap: built.tightGap ?? 0,
       // pieces that start in mid-air (see overhangs.js floatingPieces), with the
       // drop of the first: the plugins' readouts say so, as the site's does
       floating: built.floating?.length ?? 0,

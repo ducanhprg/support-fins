@@ -183,7 +183,11 @@ print(json.dumps([stats["braces"], stats["tines"]]))
 def test_report_says_what_was_not_reached():
     assert host.host_report({"braces": 1, "tines": 1}) == "1 wall, 1 tine"
     line = host.host_report({"braces": 3, "tines": 12, "unserved": 2, "floating": 1, "floatingDrop": 4.25})
-    assert line.startswith("3 walls, 12 tines; 2 overhangs are too shallow for a fin this way up")
+    assert line.startswith("3 walls, 12 tines; 2 overhangs got no fin this way up")
+    # the ones too close above the part for any fin are named apart
+    line = host.host_report({"braces": 0, "tines": 0, "unserved": 5, "unservedTight": 3, "tightGap": 1.9})
+    assert line == ("0 walls, 0 tines; 3 overhangs sit too close above the part for a fin (gap under 1.9 mm); "
+                    "2 overhangs got no fin this way up (try another pose, or add a wall by hand)")
     assert "one piece isn't joined to the rest: it starts 4.2 mm up, held only by supports" in line
     assert "the first starts 1.0 mm up" in host.host_report({"floating": 2, "floatingDrop": 1})
     # sway braces hold the tall sides, not an overhang: named apart, never added to the walls

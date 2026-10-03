@@ -315,6 +315,7 @@ function raceRegions(faces, result, a, b) {
     for (const q of qb) take(b, q);
     for (const q of extra) take(a, q);
   }
-  return { triangles: out, props, skipped: a.skipped, served: served.size,
+  return { triangles: out, props, skipped: a.skipped,
+           regionSkips: { ...(b.regionSkips ?? {}), ...(a.regionSkips ?? {}) }, served: served.size,
            servedRegions: [...served], tines, sagRisk, volume, rasterRegions: swapped };
 }

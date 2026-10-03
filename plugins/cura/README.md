@@ -54,8 +54,10 @@ ln -s "$PWD/plugins/cura/build/SupportFins" ~/Library/Application\ Support/cura/
 2. **Extensions › Support Fins › Add Support Fins** (the selected parts, or every part on the
    plate when nothing is selected). *Computing fins…* shows for a
    second or three (the engine runs in the background), then the result: walls and tines
-   placed, plus any overhang too shallow for a fin this way up and any piece of the part that
-   starts in mid-air. Those aren't hidden: tilt the part and run it again.
+   placed, plus any overhang that got no fin this way up and any piece of the part that
+   starts in mid-air. Those aren't hidden: tilt the part and run it again. Overhangs too
+   close above the part for any fin (a print-in-place joint) are named apart: no pose fixes
+   those, and they're meant to print as they are.
 3. Turn Cura's own supports off for the part, and slice.
 
 - The fins move with the part. **Rotate or scale** the part and a *Fins are out of date*

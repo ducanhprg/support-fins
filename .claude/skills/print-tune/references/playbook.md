@@ -102,6 +102,52 @@ hold the straight runs, the painted spots take the domes and the overhangs over 
 part. On mechanical parts and simple figures (ZKULL's legs), fins often hold
 everything.
 
+**"Held" is not "supported" on a broad, near-level ceiling.** The analysis counts a
+region held when a fin reaches it, but a fin is a wall, not a surface: between the
+walls a near-level ceiling prints into air. ZKULL's head (X2D, PETG, tuned v2,
+2026-10-04) was "97% held" and its overhangs came out terrible: the cranium
+ceiling over the jaw (1553 mm², ~25° off level, 10 mm up) had 54% of its area more
+than 3 mm from any fin, up to 10 mm, with the engine's default wide-face coverage
+(50). For any held ceiling within ~30° of level and over ~200 mm², measure the
+distance from its surface to the nearest fin. Most of it should be within 3 mm,
+PETG especially (it sags more). If not, build the fins with `--coverage 100` (on
+that head, 7% beyond 3 mm instead of 46%, 21 walls instead of 14, +2 g) and paint
+what is still far. If coverage can't close the gaps, treat the ceiling as a
+support spot.
+
+**The decision, per piece: no support, fins, or trees, whichever suits it** (the
+user, 2026-10-04, after a swing each way: fins everywhere, then trees everywhere).
+`analyze_pieces.mjs` makes it with numbers; the thresholds are its constants and
+each carries its evidence:
+1. **Needs support?** Only overhang the slicer itself would support counts: faces
+   flatter than the preset's threshold angle (25° at 0.16 mm), 2 mm or more above
+   the plate, not over a tight gap, in patches 5 mm wide or more (narrower ones
+   step over on their perimeters: overhang perimeters reach ~2-3 mm unsupported per
+   a Prusa Core One test; bridge figures of 10-20 mm are for straight spans and
+   don't apply to curved ceilings). Under 50 mm² in all: no support.
+2. **Fins?** Built at coverage 50, then 100 if that falls short. Fins win when they
+   come within 3 mm of at least 90% of the needing area (farther, a ceiling sags:
+   ZKULL's head at 51% did) and weigh no more than 15% of the piece or 3 g (the Dr.
+   Doom mask's fins weighed 89% of the mask and took 2.5x the time). What's left
+   over 50 mm² is painted for trees beside the fins.
+3. **Otherwise organic trees** (style per section 3).
+Checked against real prints: Dr. Doom mask trees, ZKULL head trees, ZKULL legs
+fins, flat pieces none. The Baby Parasaurolophus' 13-16 mm socket roofs stay
+counted although its designer prints them unsupported (plates 1-2 printing,
+2026-10-04): if they come out clean, that's evidence for that shape only.
+
+**Pose matters most for a shell's visible side.** If a piece's supports land on
+its visible face (a mask's brows and nose), `pose_visible.mjs` ranks rotations by
+needing overhang outside vs inside. Be_Dr._Doom's face piece: 974 mm² outside as
+the designer placed it, 7 mm² at X -120°, Y -60°, with the trees moved inside.
+Don't tilt a sculpted piece only to suit fins: that moved ZKULL's head's overhang
+onto its face and doubled the first mask's.
+
+**Fin cost, for the report.** Fins print as part of the model: every wall is an
+island on every layer, at wall speeds. Tall walls multiply it (the first mask: 227 g
+of fins, 41.5 h against 16.5 h with trees). Cutouts save plastic, not time (Lattice
+227 to 146 g); raising the overhang threshold barely helps (192-199 g).
+
 A loose piece hanging less than the tight gap over the part (ZKULL's hat tag, 1.2
 mm) counts as a tight gap: a support squeezed under it would fuse it on. Mention it
 as something to look at in the preview. A loose piece hanging higher gets its

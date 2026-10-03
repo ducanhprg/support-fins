@@ -179,6 +179,44 @@ def painted(xml, mesh_oid):
     return [i for i, t in enumerate(re.findall(r'<triangle [^>]*/>', block)) if 'paint_supports="4"' in t]
 
 
+def rotation(ax, ay):
+    """World rotation, X first then Y (degrees), as the slicer's rotation fields apply
+    them; returned in row-vector form A (world' = world @ A)."""
+    import math
+    a, b = math.radians(ax), math.radians(ay)
+    rx = [[1, 0, 0], [0, math.cos(a), -math.sin(a)], [0, math.sin(a), math.cos(a)]]
+    ry = [[math.cos(b), 0, math.sin(b)], [0, 1, 0], [-math.sin(b), 0, math.cos(b)]]
+    q = [[sum(ry[i][k] * rx[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+    return [q[c][r] for r in range(3) for c in range(3)]     # transpose, row-major
+
+
+def world_vertices(zin, comps, oid, item, cache):
+    """Every vertex of an object as it sits on the plate (component, then item transform)."""
+    pts = []
+    for path, mesh_oid, ct in comps[oid]:
+        if path not in cache:
+            cache[path] = zin.read(path).decode('utf-8')
+        block = mesh_block(cache[path], mesh_oid).group(0)
+        m = compose(ct, item) if ct else item
+        for x, y, z in re.findall(r'<vertex x="([^"]+)" y="([^"]+)" z="([^"]+)"', block):
+            pts.append(apply(m, (float(x), float(y), float(z))))
+    return pts
+
+
+def turned_item(item, ax, ay, pts):
+    """The item transform turned about the object's own centre and set back on the
+    plate (lowest point at z 0), its centre staying where it was in X and Y."""
+    A = rotation(ax, ay)
+    lo = [min(p[k] for p in pts) for k in range(3)]
+    hi = [max(p[k] for p in pts) for k in range(3)]
+    c = [(lo[k] + hi[k]) / 2 for k in range(3)]
+    t = [c[k] - sum(c[r] * A[r * 3 + k] for r in range(3)) for k in range(3)]
+    new = compose(item, A + t)
+    z0 = min(apply(A + t, p)[2] for p in pts)
+    new[11] -= z0
+    return new
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('project')
@@ -263,6 +301,24 @@ def main():
     items = {m.group(1): mat(m.group(2)) for m in re.finditer(r'<item objectid="(\d+)"[^>]*?transform="([^"]+)"', root)}
     comps = components(root)
     changed, report, cache = {}, [], {}
+
+    # --- turns: a piece's pose, before anything is cut for it ---
+    for name, spec in OBJ.items():
+        if not spec.get('rotate'):
+            continue
+        assert not spec.get('fins') and not spec.get('paint_supports'), (
+            f'{name!r}: turn it first and analyze the turned project; fins and paint cut for the old pose would be wrong')
+        oid = objects[name]['id']
+        ax, ay = spec['rotate']
+        pts = world_vertices(zin, comps, oid, items[oid], cache)
+        new = turned_item(items[oid], ax, ay, pts)
+        ext = [max(apply(new, p)[k] for p in pts) - min(apply(new, p)[k] for p in pts) for k in range(3)]
+        items[oid] = new
+        fmt = ' '.join(f'{v:.9g}' for v in new)
+        root, n = re.subn(r'(<item objectid="' + oid + r'"[^>]*?transform=")[^"]+(")', lambda mm: mm.group(1) + fmt + mm.group(2), root)
+        assert n == 1, f'{name!r}: build item not found'
+        changed['3D/3dmodel.model'] = root.encode('utf-8')
+        report.append(f'turned {name!r} X{ax:+g} Y{ay:+g}: now {ext[0]:.0f} x {ext[1]:.0f} x {ext[2]:.0f} mm, on the plate')
     for name, spec in OBJ.items():
         if not spec.get('paint_supports'):
             continue

@@ -2,7 +2,7 @@
 // has on the slicer's plate, with the material and layer height the project uses.
 //
 //   node --max-old-space-size=12000 analyze_pieces.mjs PROJECT.3mf --inspect project.json
-//        [--only "Name,Name"] [--suggest "Name,Name"] [--json pieces.json] [--paint DIR]
+//        [--only "Name,Name"] [--suggest "Name,Name"] [--json pieces.json] [--paint DIR] [--coverage 0-100]
 //
 // --inspect   inspect_project.py's --json output (material per object, layer height)
 // --suggest   also rank orientations for these pieces (slow: ~20 s each on 1M triangles)
@@ -37,6 +37,11 @@ const only = flag('--only')?.split(',').map((s) => s.trim());
 const suggest = new Set(flag('--suggest')?.split(',').map((s) => s.trim()) ?? []);
 const projectLayer = Number(info.process.layer_height);
 const paintDir = flag('--paint');
+// Wide-face coverage, 0-100 as the CLI and the site take it (the engine wants 0-1).
+// A broad near-level ceiling needs its walls close: 100 for PETG and for any big flat
+// underside (ZKULL's head sagged between walls at the default 50).
+const COVERAGE = flag('--coverage');
+const VERBOSE = args.includes('--verbose');   // every support spot, one line each
 // One option, two spellings: Bambu Studio's tree_organic is Orca's organic (the
 // profiles write each machine's own token).
 const ORGANIC = /bambu/i.test(info.application ?? '') ? 'tree_organic' : 'organic';
@@ -179,6 +184,56 @@ function looseBottom(topo, off, p) {
   return out;
 }
 
+// ---- Fins, trees or nothing: the per-object decision (the user's core ask) --------
+// What the slicer would support is what needs support: faces flatter than the
+// preset's own threshold angle (its "slope below N degrees"), not the fin engine's
+// 45 degrees. The profiles' ladder gives 25 at 0.16 mm, so a 40-degree slope prints
+// on its own (the Parasaurolophus' designer prints it without support).
+const NEED_MIN = 50;        // mm²: less than this, summed, prints without support
+// A needing patch narrower than this (the short side of its footprint) prints on its
+// own: anchored on both edges, nothing in it is more than NARROW/2 = 2.5 mm out, and
+// a curved ceiling prints as overhang perimeters, which reach ~2-3 mm unsupported
+// (MIT HTMAA group test on a Prusa Core One; design guides say ~1.2 mm). Bridge
+// figures (10-20 mm) don't apply: those are straight spans laid between two anchors.
+// Wider patches stay counted even where a designer prints them unsupported (the Baby
+// Parasaurolophus' 13-16 mm socket roofs): a fin or support there costs little.
+const NARROW = 5;          // mm
+const NEAR_FIN = 3;         // mm: farther than this from a fin, a ceiling sags (ZKULL head, PETG)
+const FINS_HOLD = 0.9;      // share of the needing area that must be near a fin for fins to win
+const FIN_COST = 0.15;      // fin plastic as a share of the piece's own (solid) plastic...
+const FIN_COST_MIN = 3;     // ...or this many grams, whichever is larger
+// Each needing face's distance to the nearest fin vertex (hash grid, NEAR_FIN cells).
+function nearFin(tris) {
+  const H = new Map(), C = NEAR_FIN;
+  const key = (x, y, z) => `${Math.floor(x / C)},${Math.floor(y / C)},${Math.floor(z / C)}`;
+  for (const v of tris) { const k = key(v[0], v[1], v[2]); if (!H.has(k)) H.set(k, []); H.get(k).push(v); }
+  return (x, y, z) => {
+    const cx = Math.floor(x / C), cy = Math.floor(y / C), cz = Math.floor(z / C);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+      for (const v of H.get(`${cx + i},${cy + j},${cz + k}`) ?? []) {
+        const dx = v[0] - x, dy = v[1] - y, dz = v[2] - z;
+        if (dx * dx + dy * dy + dz * dz <= C * C) return true;
+      }
+    }
+    return false;
+  };
+}
+function centroid(topo, off, f) {
+  let x = 0, y = 0, z = 0;
+  for (let j = 0; j < 9; j += 3) { x += topo.pos[f * 9 + j]; y += topo.pos[f * 9 + j + 1]; z += topo.pos[f * 9 + j + 2]; }
+  return [x / 3 + off.x, y / 3 + off.y, z / 3 + off.z];
+}
+function solidGrams(topo, density) {
+  let v = 0;
+  const P = topo.pos;
+  for (let f = 0; f < topo.nFaces; f++) {
+    const o = f * 9;
+    v += P[o] * (P[o + 4] * P[o + 8] - P[o + 5] * P[o + 7]) - P[o + 1] * (P[o + 3] * P[o + 8] - P[o + 5] * P[o + 6])
+       + P[o + 2] * (P[o + 3] * P[o + 7] - P[o + 4] * P[o + 6]);
+  }
+  return Math.abs(v) / 6 * density / 1000;
+}
+
 const m = await readThreeMF(new Uint8Array(readFileSync(FILE)));
 const byIndex = new Map(info.objects.map((o) => [o.cli_index, o]));
 const out = [];
@@ -191,16 +246,64 @@ for (let i = 0; i < m.objects.length; i++) {
   // An object can carry its own layer height (a per-object override); the tines are
   // one layer tall, so they must be cut for the layer this object actually prints at.
   const layerHeight = Number(meta.overrides?.layer_height ?? projectLayer);
-  const opts = { ...ENGINE_DEFAULTS, material, layerHeight };
+  const opts = { ...ENGINE_DEFAULTS, material, layerHeight, ...(COVERAGE != null ? { coverage: Number(COVERAGE) / 100 } : {}) };
   const { tunables } = clearances(opts);
   const { pos } = seatSoup(o.positions);
   const topo = buildTopology({ getAttribute: (k) => (k === 'position' ? { array: pos } : null) });
   const res = analyze(topo, opts.threshold, I);
-  const b = buildFins(topo, res, I, { mode: 'auto', bedPad: true, tines: opts.tines, tineDensity: opts.tineDensity,
-    layerHeight, coverage: opts.coverage, tunables });
+  const fins = (coverage) => buildFins(topo, res, I, { mode: 'auto', bedPad: true, tines: opts.tines,
+    tineDensity: opts.tineDensity, layerHeight, coverage, tunables });
+  let b = fins(opts.coverage);
   const off = res.offset;
+  // What needs support: overhang faces flatter than the preset's threshold, above
+  // the near-bed band, not over a tight gap (a support there would fuse it).
+  const thr = Number(info.process.support_threshold_angle ?? 25);
+  const cutNeed = -Math.cos((thr * Math.PI) / 180);
+  const tightAll = new Set(tightRegions(topo, res, I, res.regions.map((_, k) => k)));
+  const need = [];   // [face, centroid]
+  res.regions.forEach((g, ri) => {
+    if (tightAll.has(ri)) return;
+    for (const f of g.faces) {
+      if (topo.nrm[f * 3 + 2] >= cutNeed) continue;
+      const c = centroid(topo, off, f);
+      if (c[2] >= NEAR_BED) need.push([f, c, ri]);
+    }
+  });
+  // Per region: how narrow its needing patch is (the short side of its footprint) and
+  // how far it hangs over what's below. A narrow patch close over the part is a
+  // socket or hole roof: each layer steps in a little and it prints unsupported.
+  const patch = new Map();
+  for (const [f, c, ri] of need) { if (!patch.has(ri)) patch.set(ri, []); patch.get(ri).push(c); }
+  const patchInfo = new Map([...patch].map(([ri, cs]) => {
+    const mx = cs.reduce((t, c) => t + c[0], 0) / cs.length, my = cs.reduce((t, c) => t + c[1], 0) / cs.length;
+    let sxx = 0, syy = 0, sxy = 0;
+    for (const c of cs) { const dx = c[0] - mx, dy = c[1] - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+    const th = 0.5 * Math.atan2(2 * sxy, sxx - syy), ux = Math.cos(th), uy = Math.sin(th);
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+    for (const c of cs) { const u = (c[0] - mx) * ux + (c[1] - my) * uy, v = -(c[0] - mx) * uy + (c[1] - my) * ux;
+      a0 = Math.min(a0, u); a1 = Math.max(a1, u); b0 = Math.min(b0, v); b1 = Math.max(b1, v); }
+    const drops = [];
+    for (let k = 0; k < cs.length; k += Math.max(1, Math.floor(cs.length / 24))) {
+      const [x, y, z] = cs[k]; let d = z;
+      for (let t = 0.3; t < z - 0.05; t += 0.5) if (insidePart(topo, I, off, x, y, z - t)) { d = t; break; }
+      drops.push(d);
+    }
+    drops.sort((p, q) => p - q);
+    return [ri, { width: Math.min(a1 - a0, b1 - b0), drop: drops[drops.length >> 1] }];
+  }));
+  // A needing patch narrower than NARROW prints on its own: drop it.
+  for (let k = need.length - 1; k >= 0; k--) if (patchInfo.get(need[k][2]).width < NARROW) need.splice(k, 1);
+  const needArea = need.reduce((t, [f]) => t + topo.area[f], 0);
+  // Share of it within NEAR_FIN of a fin; too little at the default coverage: try 100.
+  const nearOf = (bb) => { const nf = nearFin(bb.triangles); return need.map(([, c]) => nf(c[0], c[1], c[2])); };
+  const shareOf = (near) => needArea ? need.reduce((t, [f], k) => t + (near[k] ? topo.area[f] : 0), 0) / needArea : 1;
+  let near = nearOf(b), finShare = shareOf(near), coverage = opts.coverage;
+  if (COVERAGE == null && needArea >= NEED_MIN && finShare < FINS_HOLD) {
+    const b2 = fins(1), n2 = nearOf(b2), s2 = shareOf(n2);
+    if (s2 > finShare) { b = b2; near = n2; finShare = s2; coverage = 1; }
+  }
   const tightSet = new Set(tightRegions(topo, res, I, b.unservedRegions ?? []));
-  const bare = (b.unservedRegions ?? []).map((ri) => {
+  const spotOf = (ri) => {
     const g = res.regions[ri];
     let zs = 0, n = 0, overPlate = 0, top = -Infinity;
     for (const f of g.faces) for (let j = 2; j < 9; j += 3) top = Math.max(top, topo.pos[f * 9 + j] + off.z);
@@ -226,7 +329,8 @@ for (let i = 0; i < m.objects.length; i++) {
              over: tightSet.has(ri) ? 'tight' : overPlate * 2 >= n ? 'plate' : 'part',
              flat: +(fn / Math.max(fa, 1e-9)).toFixed(2), span: +Math.max(x1 - x0, y1 - y0).toFixed(0),
              no_fin: reasons.length ? reasons.map((r) => WHY[r] ?? r) : ['no wall could be placed under it'] };
-  });
+  };
+  const bare = (b.unservedRegions ?? []).map(spotOf);
   for (const x of bare) if (x.over === 'plate' && x.top < NEAR_BED) x.over = 'bed';
   // 'tight' (print-in-place gaps: a support would fuse them) and 'bed' (the first
   // layers carry them) are reported but don't need a support
@@ -238,8 +342,31 @@ for (let i = 0; i < m.objects.length; i++) {
   const loose = b.floating.filter((p) => !(p.drop < (b.tightGap ?? 0)));
   const bareArea = bare.filter((x) => x.over === 'plate' || x.over === 'part').reduce((s, x) => s + x.area, 0);
   const held = res.overArea > 0 ? 1 - bareArea / res.overArea : 1;
-  const verdict = !realBare && !loose.length ? (walls ? 'fins-only' : 'none-needed')
-    : walls ? 'fins+paint' : 'supports';
+  // The decision. Nothing to support: none. Fins when they come near nearly all of
+  // what needs support and cost little next to the piece; otherwise trees. Measured
+  // on real prints: ZKULL's head (PETG) sagged at 51% near a fin; the Dr. Doom mask's
+  // fins weighed 89% of the mask and doubled the print time.
+  const dens = fam === 'PETG' ? 1.27 : 1.24;
+  const finG = volume([b.triangles, b.padTriangles ?? []]) * dens / 1000;
+  const partG = solidGrams(topo, dens);
+  const farFaces = need.filter((_, k) => !near[k]).map(([f]) => f);
+  const farArea = farFaces.reduce((t, f) => t + topo.area[f], 0);
+  const finsWin = walls > 0 && finShare >= FINS_HOLD && finG <= Math.max(FIN_COST_MIN, FIN_COST * partG);
+  const verdict = needArea < NEED_MIN && !loose.length ? 'none-needed'
+    : finsWin ? (farArea < NEED_MIN && !loose.length ? 'fins-only' : 'fins+paint')
+    : 'supports';
+  const decideWhy = verdict === 'none-needed'
+    ? `${Math.round(needArea)} mm² is flatter than the preset's ${thr}°: prints without support`
+    : finsWin ? `fins come within ${NEAR_FIN} mm of ${Math.round(finShare * 100)}% of the ${Math.round(needArea)} mm² that needs support, `
+      + `for ${finG.toFixed(1)} g (the piece: ${partG.toFixed(0)} g solid)${coverage === 1 ? ', at coverage 100' : ''}`
+    : needArea < NEED_MIN ? `a loose piece starts ${loose.map((p) => p.drop.toFixed(1)).join(', ')} mm in the air: supports hold it`
+    : walls === 0 ? `no fin fits (${Math.round(needArea)} mm² needs support): trees`
+    : finShare < FINS_HOLD ? `fins reach only ${Math.round(finShare * 100)}% of the ${Math.round(needArea)} mm² that needs support `
+      + `(under ${NEAR_FIN} mm), the rest would sag: trees`
+    : `fins would weigh ${finG.toFixed(0)} g, ${Math.round(finG / partG * 100)}% of the piece (${partG.toFixed(0)} g): trees cost less time`;
+  // the spots the support covers: every needing region for trees, the far ones beside fins
+  const spotRegions = [...new Set((verdict === 'supports' ? need : need.filter((_, k) => !near[k])).map(([, , ri]) => ri))];
+  const supportSpots = spotRegions.map(spotOf).filter((x) => x.over === 'plate' || x.over === 'part');
   const tippy = res.bedArea < SMALL_FOOT || res.size.z / Math.sqrt(Math.max(res.bedArea, 1e-6)) > TIPPY;
   // finish: level tops (ironing) and a feathered foot (raft)
   let flatTop = 0, feather = 0;
@@ -264,6 +391,12 @@ for (let i = 0; i < m.objects.length; i++) {
     floating: b.floating.map((p) => ({ drop: +p.drop.toFixed(1), z: +p.lowest[2].toFixed(1),
                                        tight: !loose.includes(p) })),
     brim: tippy, verdict, flat_top: +flatTop.toFixed(0), feather: +feather.toFixed(0),
+    decide: { why: decideWhy, need_area: +needArea.toFixed(0), threshold: thr, near_fin: +finShare.toFixed(2),
+              far_area: +farArea.toFixed(0),
+              spots_over_part: supportSpots.some((x) => x.over === 'part'),
+              need_by_z: [2, 4, 6, 10, 20, Infinity].map((hi, k, arr) => +need.filter(([, c]) => c[2] >= (k ? arr[k - 1] : 0) && c[2] < hi)
+                .reduce((t, [f]) => t + topo.area[f], 0).toFixed(0)),
+              coverage: Math.round(coverage * 100), fin_g: +finG.toFixed(1), part_g: +partG.toFixed(0) },
   };
   if (suggest.has(row.name)) {
     const s = suggestOrientations(topo, { top: 3 });
@@ -272,14 +405,17 @@ for (let i = 0; i < m.objects.length; i++) {
       over_area: +c.overArea.toFixed(0), regions: c.regions, coverage: +c.coverage.toFixed(2), seating: c.seating })) };
   }
   if (verdict === 'fins+paint' || verdict === 'supports') {
-    const spots = bare.filter((x) => x.over === 'plate' || x.over === 'part');
+    const spots = supportSpots;
     const iface = (info.interface_candidates ?? []).find((c) => c.loadable) ?? null;
     row.support = supportRecipe(spots.length ? spots : [{ area: 0, flat: 0, top: 99, over: 'plate' }],
                                 { manual: verdict === 'fins+paint', layer: layerHeight, process: info.process, iface });
   }
+  if (verdict === 'none-needed' && info.process.enable_support === '1') {
+    row.support = { overrides: { enable_support: '0' }, why: ['nothing past the threshold: the slicer would only add nubs'] };
+  }
   row.finish = finishRecipe(row, { feathered, flatTop, fam, process: info.process, finned: walls > 0, pad: !!b.pad });
   {
-    const spots = bare.filter((x) => x.over === 'plate' || x.over === 'part');
+    const spots = verdict === 'none-needed' || verdict === 'fins-only' ? [] : supportSpots;
     const total = spots.reduce((t, x) => t + x.area, 0);
     const ceil = spots.filter((x) => x.flat >= CEILING).reduce((m, x) => Math.max(m, x.area), 0);
     row.interface_pays = total >= PAYS_TOTAL || ceil >= PAYS_CEILING
@@ -290,25 +426,26 @@ for (let i = 0; i < m.objects.length; i++) {
     // ones), plus the bottom 1 mm of each loose piece. Face indices are the
     // object's triangles in file order: readThreeMF keeps them, and so do
     // seatSoup and buildTopology.
-    const faces = new Set();
-    for (const x of bare) if (x.over === 'plate' || x.over === 'part') for (const f of res.regions[x.region].faces) faces.add(f);
+    const faces = new Set(farFaces);
     for (const p of loose) for (const f of looseBottom(topo, off, p)) faces.add(f);
     const file = `${paintDir}/paint-${row.name.replace(/[^\w.-]+/g, '_')}.json`;
     writeFileSync(file, JSON.stringify({ object: row.name, tris: topo.nFaces, faces: [...faces].sort((a, b) => a - b) }));
     row.paint = { file, faces: faces.size };
   }
   out.push(row);
-  const real = row.bare.filter((x) => x.over === 'plate' || x.over === 'part');
-  const bareTxt = real.length ? real.map((x) => `${x.area}mm²@${x.z}mm/over-${x.over}`).join(' ') : 'none';
-  const skip = [tightBare && `${tightBare} too tight`, (row.bare.length - real.length - tightBare) && `${row.bare.length - real.length - tightBare} near-bed`].filter(Boolean);
-  console.log(`#${row.cli_index} ${row.name}  [${fam}${row.unsupported_material ? ' (fins as PLA!)' : ''}, ${layerHeight} mm]  `
-    + `h ${row.size[2]} on ${row.bed_area}mm² (${row.seating})${tippy ? ' TIPPY->brim' : ''}  regions ${row.regions} (${row.over_area}mm²)  `
-    + `fins ${walls}w/${row.fins.tines}t ${row.fins.grams}g  needs support: ${bareTxt}${skip.length ? `  (not counted: ${skip.join(', ')})` : ''}`
-    + `${row.floating.length ? `  LOOSE ${JSON.stringify(row.floating)}` : ''}`
-    + `  => ${verdict}${verdict === 'fins+paint' ? ` (fins hold ${Math.round(held * 100)}%${row.paint ? `, ${row.paint.faces} faces to paint` : ''})` : ''}`);
-  for (const x of row.bare.filter((y) => y.over === 'plate' || y.over === 'part')) {
-    console.log(`     spot ${x.area}mm² ${x.z}-${x.top}mm over the ${x.over}, ${x.flat >= CEILING ? 'flat ceiling' : `slope ${Math.round(Math.acos(Math.min(1, x.flat)) * 180 / Math.PI)}° off flat`}, `
-      + `${x.span} mm across: no fin (${x.no_fin.join('; ')})`);
+  console.log(`#${row.cli_index} ${row.name}  [${fam}${row.unsupported_material ? ' (fins as PLA!)' : ''}, ${layerHeight} mm, `
+    + `h ${row.size[2]} on ${row.bed_area} mm²${tippy ? ', tippy' : ''}${row.floating.length ? `, loose piece ${JSON.stringify(row.floating)}` : ''}]`
+    + `  => ${verdict.toUpperCase()}: ${decideWhy}`);
+  if (walls && verdict !== 'supports' && verdict !== 'none-needed') {
+    console.log(`     fins: ${walls} walls, ${row.fins.tines} tines, ${row.fins.grams} g, coverage ${row.decide.coverage}`
+      + `${row.paint ? `; ${row.paint.faces} faces painted (${row.decide.far_area} mm² beyond ${NEAR_FIN} mm of a fin)` : ''}`);
+  }
+  if (VERBOSE) {
+    for (const x of supportSpots) {
+      const pi = patchInfo.get(x.region);
+      console.log(`     spot ${x.area}mm² ${x.z}-${x.top}mm over the ${x.over}${pi ? ` (needing patch ${pi.width.toFixed(0)} mm wide, ${pi.drop.toFixed(1)} mm drop)` : ''}, ${x.flat >= CEILING ? 'flat ceiling' : `slope ${Math.round(Math.acos(Math.min(1, x.flat)) * 180 / Math.PI)}° off flat`}, `
+        + `${x.span} mm across${b.unservedRegions?.includes(x.region) ? `: no fin (${x.no_fin.join('; ')})` : ''}`);
+    }
   }
   if (Object.keys(row.finish.overrides).length) {
     console.log(`     finish: ${Object.entries(row.finish.overrides).map(([k, v]) => `${k}=${v}`).join(' ')}`);

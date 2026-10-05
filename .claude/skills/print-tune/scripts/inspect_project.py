@@ -26,7 +26,7 @@ PROCESS_KEYS = [
     'support_top_z_distance', 'support_bottom_z_distance', 'support_object_xy_distance',
     'support_filament', 'support_interface_filament', 'support_interface_top_layers',
     'support_interface_bottom_layers', 'support_interface_spacing', 'support_bottom_interface_spacing',
-    'support_interface_pattern', 'support_interface_not_for_body',
+    'support_interface_pattern', 'support_interface_not_for_body', 'independent_support_layer_height',
     'brim_type', 'brim_width', 'brim_object_gap', 'seam_position', 'wall_generator',
     'enable_prime_tower', 'print_sequence', 'filament_map_mode',
 ]

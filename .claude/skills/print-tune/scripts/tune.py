@@ -5,7 +5,12 @@ fins, or trees), make the fins, write the plan, build "<project> - tuned.3mf" an
 verify it. Prints one line per object and the verdict of the verifier.
 
     python tune.py PROJECT.3mf [--work DIR] [--out TUNED.3mf] [--coverage 0-100] [--analyze-only]
-                   [--rotate "Name=X,Y" ...]   (turn a piece first: world X, then Y, degrees; pose_visible.mjs picks them)
+                   [--rotate "Name=X,Y" ...]   (turn a piece first: world X, then Y, degrees)
+                   [--keep-pose "Name"|all ...] [--visible "Name=outside|all|front,top..." ...]
+
+Every piece's pose is checked first (pose_visible.mjs): what shows, and whether a
+turn moves the overhang off it. An offered turn or trade stops the tune (exit 2)
+until it is answered with --rotate or --keep-pose.
 
 The decision itself lives in analyze_pieces.mjs (references/playbook.md says why);
 this script only carries its answers into the plan, so a run costs one command and
@@ -41,7 +46,10 @@ def main():
     ap.add_argument('--out', help='tuned project path (default: "<project> - tuned.3mf")')
     ap.add_argument('--coverage', help='force the fins\' wide-face coverage, 0-100 (default: decided per object)')
     ap.add_argument('--analyze-only', action='store_true', help='decide and report, build nothing')
+    ap.add_argument('--only', help='"Name,Name": tune these pieces, leave the rest as they are (a plate already printing)')
     ap.add_argument('--rotate', action='append', default=[], help='"Name=X,Y": turn that piece first (world X, then Y)')
+    ap.add_argument('--keep-pose', action='append', default=[], help='tune this piece as placed although a turn was offered ("all" for every piece)')
+    ap.add_argument('--visible', action='append', default=[], help='"Name=outside|all|front,top...": correct the auto-detected visible side')
     ap.add_argument('--fins', action='append', default=[], help='fin this piece whatever the numbers say (trees painted on the rest)')
     ap.add_argument('--cutout', choices=['none', 'diamond', 'triangle', 'arch', 'lattice'], help='holes in the fin walls (saves plastic, not time)')
     a = ap.parse_args()
@@ -78,6 +86,43 @@ def main():
     print(f"{os.path.basename(src)}: {info.get('printer_preset')} · {info.get('process_preset')} · "
           f"supports {'on' if proc.get('enable_support') == '1' else 'off'} at {proc.get('support_threshold_angle')}°")
 
+    # 1b. the pose, every piece, before anything is cut for it (playbook: pose).
+    # A turn or a trade nobody has answered stops the tune: fins and paint made for
+    # a pose that is about to change would be thrown away.
+    thr = str(float(proc.get('support_threshold_angle') or 25) or 25)
+    visible = dict(v.rsplit('=', 1) for v in a.visible)
+    keep = set(a.keep_pose)
+    turned_names = {r.rsplit('=', 1)[0] for r in a.rotate}
+    only = {s.strip() for s in a.only.split(',')} if a.only else None
+    pending = []
+    print('\npose')
+    for o in info['objects']:
+        name = o['name']
+        if only is not None and name not in only:
+            continue
+        cmd = NODE + [os.path.join(HERE, 'pose_visible.mjs'), src, str(o['cli_index']), thr, '--json']
+        if name in visible:
+            cmd += ['--visible', visible[name]]
+        pose = json.loads(run(cmd, f'pose check for {name}'))
+        n, b, t = pose['now'], pose['best'], pose['trade']
+        line = f"{name[:34]:34} visible: {pose['visible']['mode']} ({pose['visible']['why']})"
+        if pose['turn']:
+            line += f"\n{'':35}turn X {b['ax']}°, Y {b['ay']}°: {pose['why']}"
+        else:
+            line += f"\n{'':35}keep: {pose['why']}"
+        print(line)
+        for note in pose['notes']:
+            print(f"{'':35}note: {note}")
+        if (pose['turn'] or t) and name not in keep and 'all' not in keep and name not in turned_names:
+            pending.append((name, b if pose['turn'] else t))
+    if pending and not a.analyze_only:
+        print('\npose decision needed before tuning, per piece:')
+        for name, r in pending:
+            print(f'  turn it:  --rotate "{name}={r["ax"]},{r["ay"]}"   (or turn it in the slicer and re-save)')
+            print(f'  keep it:  --keep-pose "{name}"')
+        print('  wrong visible side?  --visible "Name=outside|all|front,top..." and run again')
+        return 2
+
     # 2. the decision, per object
     pieces_json = os.path.join(work, 'pieces.json')
     cmd = NODE + [os.path.join(HERE, 'analyze_pieces.mjs'), src, '--inspect', pj, '--json', pieces_json, '--paint', work]
@@ -85,6 +130,8 @@ def main():
         cmd += ['--coverage', str(a.coverage)]
     if a.fins:
         cmd += ['--force-fins', ','.join(a.fins)]
+    if a.only:
+        cmd += ['--only', a.only]
     run(cmd, 'analyze_pieces')
     pieces = json.load(open(pieces_json, encoding='utf-8'))['pieces']
     names = [p['name'] for p in pieces]

@@ -135,16 +135,20 @@ Checked against real prints: Dr. Doom mask trees, ZKULL head trees, ZKULL legs
 fins, flat pieces none. The mask finned anyway, upside down (the user's site run: 81%
 near a fin, 51 g = 20% of the mask, trees painted on the far 19%), sliced to 345 g and
 22.1 h against 342 g and 16.5 h upright with trees: no plastic saved, a third more
-time, fin marks on the crown. Just under both bars means trees, not a coin toss. The Baby Parasaurolophus' 13-16 mm socket roofs stay
+time, fin marks on the crown. Just under both bars means trees, not a coin toss.
+ZKULL's body from the first X2D tune (PETG, fins at coverage 50, 2026-10-04): its round
+socket roofs sagged into strings and the fin walls left white scars along visible
+sides. Today's rule gives it trees (68% near a fin); the socket roofs also argue for
+keeping NARROW at 5 mm, not the Parasaurolophus' 16. The Baby Parasaurolophus' 13-16 mm socket roofs stay
 counted although its designer prints them unsupported (plates 1-2 printing,
 2026-10-04): if they come out clean, that's evidence for that shape only.
 
-**Pose matters most for a shell's visible side.** If a piece's supports land on
-its visible face (a mask's brows and nose), `pose_visible.mjs` ranks rotations by
-needing overhang outside vs inside. Be_Dr._Doom's face piece: 974 mm² outside as
-the designer placed it, 7 mm² at X -120°, Y -60°, with the trees moved inside.
+**Pose comes first, for every piece** (the user, 2026-10-06: "the whole printing
+flow is based on it"). `tune.py` runs `pose_visible.mjs` on each piece before the
+analysis, and a turn or trade nobody has answered stops the tune (section 2, Pose).
 Don't tilt a sculpted piece only to suit fins: that moved ZKULL's head's overhang
-onto its face and doubled the first mask's.
+onto its face and doubled the first mask's. The pose check ranks by the visible
+side, not by fins.
 
 **Fin cost, for the report.** Fins print as part of the model: every wall is an
 island on every layer, at wall speeds. Tall walls multiply it (the first mask: 227 g
@@ -167,14 +171,34 @@ Anything else (ABS, TPU, CF blends): don't fin it; say why.
 **Tines are one layer tall** and must be cut for the layer height that piece prints
 at (project layer height, or its own override). `build_tuned.py` refuses a mismatch.
 
-**Pose.** Keep the pose the user placed. It's their plate layout and usually the
-designer's choice of which faces show. Run `--suggest` only for pieces that stand
-on a point or an edge with a small contact area. The output prints the current
-pose ("now") above the candidates. A turn is *clearly better* only when it puts a
-real face on the bed (seating `face`) **and** cuts the overhang markedly; an edge
-traded for another edge is not, however much overhang it saves (ZKULL's head:
-38% less overhang, still on an edge: kept). Recommend, don't apply: the builder
-doesn't rotate objects; the user turns it in the slicer and re-runs.
+**Pose: checked for every piece, turned only on a clear win, decided by the user.**
+The pose the user placed is the default: their plate layout, often the designer's
+choice of which faces show. `pose_visible.mjs` (30° steps, world X then Y, as the
+slicer's rotation fields apply them) weighs every turn:
+1. **What shows**, auto-detected and corrected by the user (`--visible`): a shell
+   (30% or more of its surface faces inward: masks, helmets, the Dr. Doom parts at
+   32-68%) shows its outside; a solid piece (ZKULL's pieces at 13-28%) shows every
+   face; or named directions in the pose as placed (`front` = -Y, `top`, ...).
+2. **Ranking:** least needing overhang on the visible side; within 25 mm² or 10%
+   of the least, a foot on the plate, then less support overall, then lower.
+3. **Footing is a floor:** a piece on a foot (50 mm² or more) keeps one; a piece on
+   an edge never ends on a point (under 5 mm²). Unfloored, the ranking stood
+   ZKULL's body (503 mm² foot) and a Dr. Doom part (504) on 0 mm².
+4. **A turn is offered** when it takes 100 mm² or more and at least half off the
+   visible overhang; or, no worse on the visible side, when it gains a foot or
+   halves the support overall (100 mm² or more). When only giving up a foot would
+   clear the visible side, it's offered as a **trade**, the user's call. Under those
+   bars the pose stays.
+5. A turn changes how layer lines run across the visible side, which nothing here
+   measures: say so, the preview shows it.
+Numbers at 2026-10-06 (U1 projects): Dr. Doom mask visible 1255 -> 65 mm² at X -120°,
+Y -60°, bed 47 -> 7 mm². ZKULL, every face counted: head 2343 -> 147 mm² at X -150°,
+Y -30° with a foot gained (8 -> 53 mm²); with its face named (`--visible front`) the
+same turn takes the face from 70 to 0 mm² and the rest from 2343 to 147, the opposite
+of the old head tilt that moved overhang onto the face. Body 2237 -> 374 at Y 60°,
+legs 1327 -> 608 at X 90° (foot 503 -> 64 mm²). Be_Dr._Doom's part 7: no turn keeps
+its 504 mm² foot; a trade, 980 -> 353 mm² on a 6 mm² edge. The user turns the piece
+in the slicer and re-saves, or answers with `--rotate`; `--keep-pose` keeps it.
 
 ## 3. Supports for the pieces that keep them
 
@@ -193,8 +217,8 @@ and the reasons; put its overrides in the plan. What it weighs:
   fins+paint piece, `(auto)` on a supports piece.
 
 **Gap.** Zero only with the interface in a low-adhesion second material (below).
-Otherwise the preset's top Z, a whole number of layers (the slicer rounds up; a
-fractional value is written as what it will print, and said). Trees standing on the
+Otherwise the preset's top Z, a whole number of layers (the slicer rounds to the
+nearest layer; a fractional value is written as what it will print, and said). Trees standing on the
 part get 2 bottom interface layers if the preset has none.
 
 **Build plate only.** The profiles default to supports from the build plate only.
@@ -247,9 +271,18 @@ filament grouping, "Auto For Flush" usually does it; tell the user to check), or
 every interface layer costs a filament change and a purge.
 
 **No second material:** keep the profiles' gap rule, `ceil(0.15 / layer) × layer`
-(0.16 at 0.16 mm layers) with their gapped interface (3 layers, spacing 0.2). The
-slicer rounds Z gaps **up to whole layers**: "0.24" at 0.16 mm layers is really
-0.32 and the underside droops. Don't write fractional-layer gaps.
+(0.16 at 0.16 mm layers) with their gapped interface (3 layers, spacing 0.2). When
+supports print on the model's layers (`independent_support_layer_height` off, as
+on the user's U1 projects), the slicer rounds Z gaps to the **nearest whole layer**,
+half up: `round(gap / layer + eps) × layer` in Slicing.cpp, the same in Bambu
+Studio, OrcaSlicer and Snapmaker Orca (read 2026-10-06). "0.24" at 0.16 mm layers
+is 1.5 layers and prints as 0.32; "0.20" at 0.16 prints as 0.16; "0.28" at 0.20
+prints as 0.20; under half a layer rounds to 0 and welds. Organic trees round it
+again to whole layers and sit on the model's layer grid even with independent
+support layer height on (TreeSupportCommon.hpp, `layer_z`). Other kinds with
+independent support layers on: not checked. Don't write fractional-layer gaps.
+Evidence: the Dr. Doom mask (U1, PLA, 0.16 mm, organic trees) printed at "0.24",
+so 0.32, and snapped off easily (2026-10-06; underside not yet judged).
 
 ## 4. Finish: brim, raft, ironing, walls (every piece, supported or not)
 

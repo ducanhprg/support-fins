@@ -105,16 +105,27 @@ function supportRecipe(spots, { manual, layer, process, iface }) {
     }
   }
   // gap: zero only with the interface in a low-adhesion material; otherwise the
-  // preset's gap, rounded UP to whole layers (the slicer does, so say so)
+  // preset's gap, rounded to the NEAREST whole layer, half up, as the slicer does:
+  // round(top / layer + eps) in Slicing.cpp (Bambu Studio, Orca, Snapmaker Orca
+  // v2.4.0) when independent support layer height is off; organic trees round it
+  // again and sit on the model's layer grid either way (TreeSupportCommon.hpp).
+  // Other kinds with independent support layers on: not checked, left as written.
   const top = Number(process.support_top_z_distance ?? layer);
   if (iface) {
     why.push(`top Z 0 with the interface in slot ${iface.slot} (${iface.type}): set project-wide (playbook section 3)`);
+  } else if (process.independent_support_layer_height === '1' && ov.support_style !== ORGANIC) {
+    why.push(`top Z ${top} (the preset's; independent support layer height is on, so it may print as written: check the preview): no second material for a zero gap`);
   } else {
-    const whole = Math.max(1, Math.ceil(top / layer - 1e-6)) * layer;
-    if (Math.abs(whole - top) > 1e-6) {
+    const n = Math.round(top / layer + 1e-6);
+    const whole = Math.max(1, n) * layer;
+    const layers = (k) => `${k} layer${k === 1 ? '' : 's'}`;
+    if (n < 1) {
       ov.support_top_z_distance = whole.toFixed(2);
-      why.push(`top Z ${top} rounds up to ${whole.toFixed(2)} at ${layer} mm layers; written as it will print`);
-    } else why.push(`top Z ${top} (the preset's, one layer${top / layer > 1.5 ? 's' : ''} at ${layer} mm): no second material for a zero gap`);
+      why.push(`top Z ${top} rounds to 0 at ${layer} mm layers and would weld the supports on; written as ${layers(1)} (${whole.toFixed(2)})`);
+    } else if (Math.abs(whole - top) > 1e-6) {
+      ov.support_top_z_distance = whole.toFixed(2);
+      why.push(`top Z ${top} prints as ${whole.toFixed(2)} (${layers(n)} at ${layer} mm, the slicer rounds to the nearest layer); written as it will print`);
+    } else why.push(`top Z ${top} (the preset's, ${layers(n)} at ${layer} mm): no second material for a zero gap`);
   }
   if (spots.some((x) => x.over === 'part') && Number(process.support_interface_bottom_layers ?? 0) === 0) {
     ov.support_interface_bottom_layers = '2';
@@ -426,7 +437,7 @@ for (let i = 0; i < m.objects.length; i++) {
   }
   row.finish = finishRecipe(row, { feathered, flatTop, fam, process: info.process, finned: walls > 0, pad: !!b.pad });
   if (onPoint && verdict !== 'fins-only' && verdict !== 'fins+paint') {
-    row.finish.notes.unshift(`stands on ${row.bed_area} mm² only, ${row.size[2]} mm tall: turn it onto a foot (pose_visible.mjs lists poses with one)`);
+    row.finish.notes.unshift(`stands on ${row.bed_area} mm² only, ${row.size[2]} mm tall: its supports stay on and the brim holds it (the pose check weighed a foot against the visible side)`);
   }
   {
     const spots = verdict === 'none-needed' || verdict === 'fins-only' ? [] : supportSpots;

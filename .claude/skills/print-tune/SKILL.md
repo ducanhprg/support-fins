@@ -20,14 +20,33 @@ A tune is one command and its summary; don't rebuild the analysis by hand.
 python .claude/skills/print-tune/scripts/tune.py "<project>.3mf" --work <scratch>/tune
 ```
 
-About 30-60 s per million triangles. It inspects the project, decides every
-piece, makes the fins at the coverage it chose, writes the plan, builds and
-verifies. It prints one line per piece (verdict and why), the overrides it set,
-notes, and `VERIFIED` with the output path. `--analyze-only` decides and stops.
-A project for another printer (a designer's file) is analyzed but not built: tell
-the user what to set in one re-save (printer, process, filament), then run again.
+About 30-60 s per million triangles. It inspects the project, **checks every
+piece's pose first**, then decides every piece, makes the fins at the coverage it
+chose, writes the plan, builds and verifies. It prints a pose block, one line per
+piece (verdict and why), the overrides it set, notes, and `VERIFIED` with the
+output path. `--analyze-only` decides and stops. A project for another printer (a
+designer's file) is analyzed but not built: tell the user what to set in one
+re-save (printer, process, filament), then run again.
 
-## 2. Read the summary, ask only what it flags
+## 2. The pose: always answered before the tune goes on
+
+The whole print depends on the pose: which faces overhang, where the support scars
+land, what stands on the plate. So every tune checks it, and when a turn (or a
+trade that gives up a foot) would clear the visible side, `tune.py` stops with exit
+code 2 before building anything. Show the user, per piece:
+
+- **what it took as visible** (`visible: outside (auto: 48% faces inward, a shell)`).
+  They correct it when it's wrong: `--visible "Name=all"`, `=outside`, or directions
+  in the pose as placed, `=front,top` (front is -Y, toward the viewer).
+- **the offer**: the turn, the visible overhang before and after, the footing, and
+  the note that a turn changes how layer lines cross the visible side.
+
+Then run again with their answer: `--rotate "Name=X,Y"` (or they turn it in the
+slicer, world-axis fields X first then Y, and re-save) or `--keep-pose "Name"`.
+Never pick for them, and never skip the check. The thresholds and their evidence
+are in the playbook (section 2, Pose).
+
+## 3. Read the summary, ask only what it flags
 
 - `same name as another object: not tuned`: ask them to rename those in the slicer.
 - `a second support material would pay`: ask once, only for a piece whose supports
@@ -35,17 +54,13 @@ the user what to set in one re-save (printer, process, filament), then run again
 - A display piece vs a load-bearing one only if it isn't obvious (more walls on a
   load-bearing piece).
 
-## 3. When the pose is the problem
-
-If a piece's supports land on its visible face, compare poses before tuning:
-`scripts/pose_visible.mjs "<project>.3mf" <cli_index> <threshold>` ranks rotations
-by needing overhang on the outside (visible) vs the inside (hidden) of a shell.
-Recommend a turn only when it moves that overhang to hidden faces; the user rotates
-in the slicer (world-axis rotation fields: X first, then Y) and re-saves.
+For one piece by hand: `scripts/pose_visible.mjs "<project>.3mf" <cli_index>
+<threshold> [--visible ...] [--all]` prints the ranking.
 
 ## 4. Report
 
 ```
+Pose: <per piece: kept / turned X,Y, and what shows>
 Tuned: <path>  (verified; not sliced)
 | Piece | Verdict | Why |  (from the summary, one line each)
 Changed: <settings and overrides, each with its reason>

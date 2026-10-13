@@ -57,6 +57,26 @@ are in the playbook (section 2, Pose).
 For one piece by hand: `scripts/pose_visible.mjs "<project>.3mf" <cli_index>
 <threshold> [--visible ...] [--all]` prints the ranking.
 
+## 3b. Tall, slender pieces: the sleeve
+
+A piece can need no support and no fins and still not print: a 245 mm screw 16 mm across stands
+on a small foot, the nozzle drags on it every layer, it works loose and falls mid-print (two
+U1 prints of this model came off). Fins and trees cannot help; the answer is a **sleeve**, a thin
+tube printed in the same layers that follows the piece's outline 0.6 mm away, so it can never
+move more than that. Offer it for any piece whose height is about 8x its widest footprint
+or more and whose verdict is "no support".
+
+```
+python .claude/skills/print-tune/scripts/add_sleeve.py "<tuned>.3mf" -o "<name> - tuned - sleeve.3mf" --object "<piece>" [--object ...]
+```
+
+It merges the sleeve into the piece's own mesh (the piece keeps its slot and settings), anchors it
+with a 0.56 mm web over the first three layers, and puts two thin tear lines in the wall. It checks
+the gap (no less than 0.5 mm anywhere). Tell the user the cost (about 15 g of filament per
+sleeve at 0.16 mm layers on a 245 mm piece), that the web needs a knife and the tear lines a
+twist to free the piece, and that nothing here slices, so the preview is the check.
+Not yet tested on a print: when the user reports how it came off, record it here.
+
 ## 4. Report
 
 ```
